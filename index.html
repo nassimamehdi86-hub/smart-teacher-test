@@ -368,6 +368,12 @@ function getClaudeApiUrl(){
 /* ============================= CONFIG / FIREBASE ============================= */
 const FB_KEY = 'examPlatform_firebaseConfig_v1';
 const TID_KEY = 'examPlatform_teacherId_v1';
+// ⚠️ لوحة المشرف: هاذ الكلمة السرية مكتوبة مباشرة فكود الصفحة، يعني أي واحد يفتح "عرض مصدر
+// الصفحة" (View Source) فالمتصفح يقدر يشوفها. هذا كافٍ فقط باش تمنعي التلاميذ أو الأساتذة
+// العاديين من الدخول بالصدفة — بدّليها بكلمة خاصة بيك قبل النشر، وماشي حماية حقيقية ضد شخص
+// يعرف كيفاش يفتح أدوات المطوّر.
+const ADMIN_PASSWORD = 'غيّري_هذه_الكلمة_2026';
+const ADMIN_KEY = 'examPlatform_isAdmin_v1';
 let db = null;
 
 // Baked in so this specific copy works without manual setup. For a blank sellable
@@ -381,10 +387,20 @@ const DEFAULT_FIREBASE_CONFIG = {
   appId: "1:318757828857:web:badac6280b4d36bc1c8a28"
 };
 
+// دابا الكود ديال الأستاذ(ة) يتحدد يدويًا (يختاروه أو يدخلوه) من شاشة الدخول، وماشي عشوائيًا
+// بصمت بحال قبل — هذا هو اللي كيسمح لنفس الأستاذ(ة) يدخل لحسابه من أي جهاز بنفس الكود، وكيربط
+// كل اختباراته بحساب واحد بدل ما تبقى مرتبطة بجهاز معيّن (localStorage) وتضيع عند تبديل الجهاز.
 function getTeacherId(){
-  let t = localStorage.getItem(TID_KEY);
-  if(!t){ t = 'ust_' + Math.random().toString(36).slice(2,10); localStorage.setItem(TID_KEY, t); }
-  return t;
+  return (localStorage.getItem(TID_KEY) || '').trim();
+}
+function setTeacherId(code){
+  localStorage.setItem(TID_KEY, code);
+}
+function clearTeacherId(){
+  localStorage.removeItem(TID_KEY);
+}
+function normalizeTeacherCode(s){
+  return (s||'').toString().trim().toLowerCase().replace(/\s+/g,'');
 }
 
 function isFullyConfigured(){
@@ -840,6 +856,7 @@ async function renderLanding(){
     </div>
     <div class="card">
       <h3 style="margin-top:0;">🔍 ابحث عن اختبارك</h3>
+      <div id="scopeNotice"></div>
       <div class="row">
         <div class="field" style="flex:1;min-width:140px;">${levelSelectHTML('lvSelLanding','')}</div>
         <div class="field" style="flex:1;min-width:140px;">${subjectSelectHTML('subjSelLanding','')}</div>
@@ -862,29 +879,58 @@ async function renderLanding(){
   const lvSel = document.getElementById('lvSelLanding');
   const subjSel = document.getElementById('subjSelLanding');
   let hidden = getHiddenExams();
-  let allDocs = [];
-  let dataLoaded = false;
+  let reqToken = 0;
+  // إلا كان الرابط فيه ?t=كود_الأستاذ(ة)، البحث كيبقى محصورًا فاختبارات هذا الأستاذ(ة) فقط —
+  // هذا هو الرابط اللي كل أستاذ(ة) كيشارك مع تلاميذه (زر "نسخ" فلوحة الأستاذ(ة)).
+  const scopeTeacherId = new URLSearchParams(location.search).get('t') || null;
+  if(scopeTeacherId){
+    document.getElementById('scopeNotice').innerHTML = `<p class="muted" style="margin-top:-4px;">📚 تعرضين هنا اختبارات أستاذ(ة) محدَّد فقط.</p>`;
+  }
 
-  function renderFeed(){
+  // مهم: البحث دابا كيسولف مباشرة من القاعدة بالمادة والمستوى المختارين (بدل ما يجيب فقط
+  // آخر 50 اختبار فالتطبيق كامل ويصفّي محليًا). القيد القديم (limit 50) كان كيخبّي أي اختبار
+  // أقدم من آخر 50 اختبار تم إنشاؤه — حتى لو مطابق تمامًا للاختيار — وهذا كان سبب "أحيانًا
+  // ما كيبانش رغم أنه كاين". فلترة بـ where() فقط (بلا orderBy على حقل مختلف) ما كتحتاجش
+  // أي فهرس إضافي فFirebase.
+  async function renderFeed(){
     const lv = lvSel.value, sj = subjSel.value;
     showHiddenLink.style.display = hidden.length>0 ? 'inline' : 'none';
-    if(!lv && !sj){
+    // إلا كان الرابط مخصوصًا بأستاذ(ة) معيّن، نعرضو كل اختباراتو مباشرة بلا ما نجبرو اختيار
+    // مادة/مستوى أولاً (الكتالوج أصلاً محصور ومحدود). فالبحث العام (بلا ?t=)، لازم على الأقل
+    // فلتر وحد باش ما نديرو استعلام مفتوح على كل الاختبارات.
+    if(!scopeTeacherId && !lv && !sj){
       feed.innerHTML = '<p class="muted">اختاري المستوى و/أو المادة أعلاه لعرض الاختبارات المتاحة.</p>';
       return;
     }
-    // إلا مازال التحميل الأول من قاعدة البيانات ماكملش، نبينو سبينر بدل "لا توجد نتائج" المضلّلة
-    if(!dataLoaded){
-      feed.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
+    const myToken = ++reqToken;
+    feed.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
+    let query = db.collection('exams');
+    if(scopeTeacherId) query = query.where('teacherId','==',scopeTeacherId);
+    if(lv) query = query.where('level','==',lv);
+    if(sj) query = query.where('subject','==',sj);
+    query = query.limit(300);
+    let snap;
+    try{
+      try{
+        // نجبرو القراءة من السيرفر مباشرة (مو الكاش المحلي) باش الاختبار الجديد المنشور يبان مباشرة
+        snap = await withTimeout(query.get({source:'server'}), 15000);
+      }catch(serverErr){
+        snap = await withTimeout(query.get(), 15000);
+      }
+    }catch(e){
+      if(myToken !== reqToken) return; // المستخدم بدّل الاختيار قبل ما توصل النتيجة، نتجاهلها
+      feed.innerHTML = `<div><span style="color:var(--red);">تعذّر جلب قائمة الاختبارات (${esc(e.message||'')}).</span> <button class="btn btn-ghost" id="retryFeed" style="margin-right:8px;padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button></div>`;
+      const rb = document.getElementById('retryFeed');
+      if(rb) rb.onclick = renderFeed;
       return;
     }
-    const matched = allDocs.filter(doc=>{
-      const ex = doc.data();
-      if(lv && ex.level!==lv) return false;
-      if(sj && ex.subject!==sj) return false;
-      return true;
+    if(myToken !== reqToken) return;
+    const docs = snap.docs.slice().sort((a,b)=>{
+      const ta = a.data().createdAt?.seconds || 0, tb = b.data().createdAt?.seconds || 0;
+      return tb - ta;
     });
-    const visibleDocs = matched.filter(d=>!hidden.includes(d.id));
-    if(matched.length===0){
+    const visibleDocs = docs.filter(d=>!hidden.includes(d.id));
+    if(docs.length===0){
       feed.innerHTML = '<p class="muted">لا توجد اختبارات مطابقة لهذا الاختيار حاليًا.</p>';
       return;
     }
@@ -923,66 +969,104 @@ async function renderLanding(){
     localStorage.setItem(HIDDEN_KEY, JSON.stringify([]));
     renderFeed();
   };
-
-  try{
-    let snap;
-    try{
-      // نجبرو القراءة من السيرفر مباشرة (مو الكاش المحلي) باش الاختبار الجديد المنشور يبان مباشرة
-      // بلا تقطّع، حتى لو كان الكاش المحلي قديم أو ناقص.
-      snap = await db.collection('exams').orderBy('createdAt','desc').limit(50).get({source:'server'});
-    }catch(serverErr){
-      snap = await db.collection('exams').orderBy('createdAt','desc').limit(50).get();
-    }
-    allDocs = snap.docs;
-    dataLoaded = true;
-    renderFeed();
-  }catch(e){
-    feed.innerHTML = `<p style="color:var(--red);">تعذّر جلب قائمة الاختبارات (${esc(e.message||'')}).</p>`;
-  }
+  if(scopeTeacherId) renderFeed();
 }
 
-/* ============================= TEACHER PIN GATE ============================= */
-const PIN_KEY = 'examPlatform_teacherPin_v1';
+/* ============================= TEACHER GATE (حساب الأستاذ(ة) بكود بسيط) ============================= */
+// ⚠️ ملاحظة أمان مهمة: هذا نظام "كود بسيط" لتجربة تمهيدية سريعة، وليس تسجيل دخول حقيقي (بحال
+// Firebase Authentication). الكود كيميّز اختبارات كل أستاذ(ة) فواجهة التطبيق، لكن ما كاينش أي
+// تحقق من هوية حقيقي على مستوى الخادم — تقنيًا، شخص يعرف كود أستاذ(ة) آخر (أو يعدّل الكود يدويًا
+// من أدوات المطوّر فالمتصفح) يقدر يشوف أو يعدّل اختباراته. مناسب لتجربة بين مجموعة أساتذة موثوقين،
+// وغير مناسب لإطلاق عمومي بلا ترقية لاحقة لتسجيل دخول حقيقي (بريد إلكتروني + كلمة سر).
+// يهجّر الاختبارات القديمة (اللي تصاوبات قبل نظام الحسابات هاذ، وكانت مرتبطة بهاذ الجهاز فقط
+// عبر لائحة محلية قديمة اسمها myExams_v1) ويربطها بكود الحساب الحالي — مرة وحدة، وبلا ما
+// يبدّل ملكية أي اختبار مرتبط بالفعل بحساب آخر (نتأكد أولاً أنه ماعندوش teacherId مسجّل).
+async function migrateLegacyExamsIfNeeded(code){
+  try{
+    const legacyIds = JSON.parse(localStorage.getItem('myExams_v1')||'[]');
+    if(!Array.isArray(legacyIds) || legacyIds.length===0) return;
+    await Promise.allSettled(legacyIds.map(async id=>{
+      const ref = db.collection('exams').doc(id);
+      const doc = await withTimeout(ref.get(), 12000);
+      if(doc.exists && !doc.data().teacherId){
+        await withTimeout(ref.set({teacherId: code}, {merge:true}), 12000);
+      }
+    }));
+    localStorage.removeItem('myExams_v1');
+  }catch(e){ console.error('legacy exam migration failed', e); }
+}
 function renderTeacherGate(){
-  const hasPin = !!localStorage.getItem(PIN_KEY);
+  const myId = getTeacherId();
+  if(myId){
+    if(!initFirebase()){ go('setup'); return; }
+    go('teacherDashboard');
+    return;
+  }
   app.innerHTML = `
     ${Header('لوحة الأستاذ(ة)')}
     <div class="card">
-      ${hasPin ? `
-        <div class="field"><label>الرمز السري (PIN)</label>
-          <input type="text" id="pinIn" inputmode="numeric" maxlength="8" placeholder="••••"></div>
-        <button class="btn btn-primary btn-block" id="pinGo">دخول</button>
-      ` : `
-        <p class="muted">هذه أول مرة تدخل فيها إلى لوحة الأستاذ(ة) من هذا الجهاز. يُرجى إنشاء رمز سري قصير (4 أرقام مثلاً) لحماية اللوحة من التلاميذ.</p>
-        <div class="field"><label>اختر رمزًا سريًا جديدًا</label>
-          <input type="text" id="pinNew" inputmode="numeric" maxlength="8" placeholder="مثلاً: 2580"></div>
-        <button class="btn btn-primary btn-block" id="pinSet">حفظ ومتابعة</button>
-      `}
-      <div id="pinErr" style="color:var(--red);margin-top:10px;font-size:13px;"></div>
+      <p class="muted">أدخل كود حسابك إلا كان عندك من قبل، أو أنشئ كودًا جديدًا لأول مرة. هذا الكود هو اللي كيميّز اختباراتك عن باقي الأساتذة — احتفظي به جيدًا، وتقدري تدخلي بيه من أي جهاز.</p>
+      <div class="field"><label>كود الأستاذ(ة)</label>
+        <input type="text" id="tCodeIn" placeholder="مثلاً: ahmed2026" autocapitalize="off" autocorrect="off"></div>
+      <div class="row" style="margin-top:10px;">
+        <button class="btn btn-primary" id="tLogin" style="flex:1;">دخول بكود موجود</button>
+        <button class="btn btn-gold" id="tCreate" style="flex:1;">إنشاء حساب جديد بهذا الكود</button>
+      </div>
+      <div id="tErr" style="color:var(--red);margin-top:10px;font-size:13px;"></div>
     </div>
     <a class="backlink" id="back" href="#">⟵ رجوع</a>
   `;
   document.getElementById('back').onclick=(e)=>{e.preventDefault(); go('landing');};
-  if(hasPin){
-    document.getElementById('pinGo').onclick = ()=>{
-      const v = document.getElementById('pinIn').value.trim();
-      if(v && v === localStorage.getItem(PIN_KEY)){
-        if(!initFirebase()){ go('setup'); return; }
-        go('teacherDashboard');
-      } else {
-        document.getElementById('pinErr').textContent = 'الرمز غير صحيح.';
+  if(!initFirebase()){ go('setup'); return; }
+
+  const errBox = document.getElementById('tErr');
+  document.getElementById('tLogin').onclick = async ()=>{
+    const code = normalizeTeacherCode(document.getElementById('tCodeIn').value);
+    if(!code){ errBox.textContent = 'يرجى إدخال الكود.'; return; }
+    errBox.textContent = '';
+    const btn = document.getElementById('tLogin');
+    const originalLabel = btn.textContent;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> جارٍ التحقق...';
+    try{
+      const doc = await withTimeout(db.collection('teachers').doc(code).get(), 12000);
+      if(!doc.exists){
+        errBox.textContent = 'هذا الكود غير مسجَّل. إلا كانت هذي أول مرة، استعملي "إنشاء حساب جديد".';
+        btn.disabled = false; btn.textContent = originalLabel;
+        return;
       }
-    };
-  } else {
-    document.getElementById('pinSet').onclick = ()=>{
-      const v = document.getElementById('pinNew').value.trim();
-      if(!v || v.length<4){ document.getElementById('pinErr').textContent = 'يرجى إدخال رمز مكوّن من 4 أرقام على الأقل.'; return; }
-      localStorage.setItem(PIN_KEY, v);
-      toast('تم تسجيل الرمز ✅ يرجى الاحتفاظ به جيدًا');
-      if(!initFirebase()){ go('setup'); return; }
+      setTeacherId(code);
+      await migrateLegacyExamsIfNeeded(code);
       go('teacherDashboard');
-    };
-  }
+    }catch(e){
+      errBox.textContent = `تعذّر التحقق من الكود (${esc(e.message||'')}).`;
+      btn.disabled = false; btn.textContent = originalLabel;
+    }
+  };
+  document.getElementById('tCreate').onclick = async ()=>{
+    const code = normalizeTeacherCode(document.getElementById('tCodeIn').value);
+    if(!code || code.length<3){ errBox.textContent = 'يرجى اختيار كود من 3 حروف/أرقام على الأقل.'; return; }
+    errBox.textContent = '';
+    const btn = document.getElementById('tCreate');
+    const originalLabel = btn.textContent;
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> جارٍ الإنشاء...';
+    try{
+      const ref = db.collection('teachers').doc(code);
+      const existing = await withTimeout(ref.get(), 12000);
+      if(existing.exists){
+        errBox.textContent = 'هذا الكود مستعمل من طرف حساب آخر. جربي كودًا مختلفًا، أو ادخلي بزر "دخول بكود موجود" إلا كان هو حسابك.';
+        btn.disabled = false; btn.textContent = originalLabel;
+        return;
+      }
+      await withTimeout(ref.set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }), 12000);
+      setTeacherId(code);
+      await migrateLegacyExamsIfNeeded(code);
+      toast('تم إنشاء حسابك ✅ احتفظي بالكود جيدًا');
+      go('teacherDashboard');
+    }catch(e){
+      errBox.textContent = `تعذّر إنشاء الحساب (${esc(e.message||'')}).`;
+      btn.disabled = false; btn.textContent = originalLabel;
+    }
+  };
 }
 
 /* ============================= FIREBASE / WORKER SETUP SCREEN ============================= */
@@ -1068,10 +1152,55 @@ function subjectSelectHTML(id, selected){
   </select>`;
 }
 
+// نسخة مخصّصة لشاشة إنشاء/تعديل الاختبار: قائمة منسدلة مقفلة (بلا كتابة حرة) لضمان أن كل
+// اختبار جديد يُسجَّل بنفس القيمة الحرفية بالضبط المستعملة فالبحث (عند التلميذ والأستاذ)،
+// مع خيار "أخرى" فقط للمواد الاستثنائية أو القيم القديمة المخزَّنة بصيغة غير قياسية.
+function subjectPickerHTML(id, selected){
+  const isCustom = !!selected && !STANDARD_SUBJECTS.includes(selected);
+  return `
+    <select id="${id}">
+      <option value="" ${!selected?'selected':''}>اختر المادة...</option>
+      ${STANDARD_SUBJECTS.map(s=>`<option value="${esc(s)}" ${selected===s?'selected':''}>${esc(s)}</option>`).join('')}
+      <option value="__other__" ${isCustom?'selected':''}>مادة أخرى (اكتب يدويًا)</option>
+    </select>
+    <input type="text" id="${id}_other" placeholder="اكتب اسم المادة يدويًا..." value="${isCustom?esc(selected):''}" style="margin-top:8px;${isCustom?'':'display:none;'}">
+  `;
+}
+function wireSubjectPicker(id){
+  const sel = document.getElementById(id);
+  const other = document.getElementById(id+'_other');
+  if(!sel || !other) return;
+  sel.onchange = ()=>{ other.style.display = sel.value==='__other__' ? '' : 'none'; if(sel.value==='__other__') other.focus(); };
+}
+function getSubjectPickerValue(id){
+  const sel = document.getElementById(id);
+  if(!sel) return '';
+  if(sel.value==='__other__'){
+    const other = document.getElementById(id+'_other');
+    return (other && other.value || '').trim();
+  }
+  return sel.value;
+}
+
 async function renderTeacherDashboard(){
-  const mine = JSON.parse(localStorage.getItem('myExams_v1')||'[]');
+  const myTeacherId = getTeacherId();
+  if(!myTeacherId){ go('teacherGate'); return; }
+  const catalogLink = `${location.origin}${location.pathname}?t=${encodeURIComponent(myTeacherId)}`;
   app.innerHTML = `
     ${Header('لوحة الأستاذ(ة)')}
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <span class="pill">🔑 حسابك: ${esc(myTeacherId)}</span>
+        <a href="#" id="switchAccount" class="backlink" style="font-size:12px;">تبديل الحساب</a>
+      </div>
+      <div class="row" style="margin-top:10px;align-items:center;">
+        <div class="field" style="flex:1;min-width:180px;">
+          <label>🔗 رابط اختباراتك (شاركيه مع تلاميذك ليتصفّحوا كل اختباراتك)</label>
+          <input type="text" id="catalogLinkBox" value="${esc(catalogLink)}" readonly style="direction:ltr;">
+        </div>
+        <button class="btn btn-ghost" id="copyCatalogLink" style="padding:10px 14px;align-self:flex-end;">نسخ</button>
+      </div>
+    </div>
     <div class="card">
       <div class="tabbar">
         <button class="tabbtn active" data-tab="exams">اختباراتي</button>
@@ -1112,6 +1241,16 @@ async function renderTeacherDashboard(){
   `;
   document.getElementById('newExam').onclick = ()=> go('teacherCreate', {draft:newDraft()});
   document.getElementById('refreshExams').onclick = ()=> loadAllExams();
+  document.getElementById('copyCatalogLink').onclick = ()=>{
+    navigator.clipboard.writeText(catalogLink);
+    toast('تم نسخ الرابط ✅');
+  };
+  document.getElementById('switchAccount').onclick = (e)=>{
+    e.preventDefault();
+    if(!confirm('تبديل الحساب غادي يسجّل خروجك من الكود الحالي فهذا الجهاز. متأكدة؟')) return;
+    clearTeacherId();
+    go('teacherGate');
+  };
 
   const tabBtns = document.querySelectorAll('.tabbtn');
   tabBtns.forEach(btn=>{
@@ -1126,12 +1265,6 @@ async function renderTeacherDashboard(){
   const listBoxMine = document.getElementById('examsListMine');
   const listBox = document.getElementById('examsList');
   const subPanel = document.getElementById('submissionsPanel');
-
-  if(mine.length===0){
-    listBoxMine.innerHTML = 'لا توجد اختبارات بعد. اضغط على "+ اختبار جديد" للبدء.';
-    listBox.innerHTML = 'لا توجد اختبارات بعد.';
-    return;
-  }
 
   let allExams = [];
   let examsLoaded = false;
@@ -1320,16 +1453,13 @@ async function renderTeacherDashboard(){
     listBox.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
     let hadPartialError = false;
     try{
-      // مهم: تحميل بيانات الاختبار وتحميل إجاباته يشتغلان بشكل منفصل تمامًا (try/catch لكل واحد
-      // على حدة). قبل هذا التصحيح كان فشل استعلام الإجابات وحده (شبكة، صلاحيات...) كيسقط
-      // الاختبار بأكمله من كل اللوائح، رغم أن بياناته الأساسية تحمّلت بنجاح — وهذا هو سبب
-      // اختفاء اختبارات فيها إجابات فعلية من تبويبة "نتائج تلاميذي".
-      const results = await withTimeout(Promise.all(mine.map(async id=>{
-        let doc;
-        try{
-          doc = await withTimeout(db.collection('exams').doc(id).get(), 15000);
-        }catch(e){ console.error('exam doc load error', id, e); hadPartialError = true; return null; }
-        if(!doc.exists) return null;
+      // مهم: دابا كنجيبو اختبارات هذا الأستاذ(ة) مباشرة عبر teacherId (استعلام واحد)، بدل ما
+      // نعتمدو على لائحة IDs مخزَّنة محليًا فالجهاز (myExams_v1) — هاذ الطريقة القديمة كانت
+      // كتفقد الاختبارات إلا بدّل الأستاذ(ة) الجهاز أو المتصفح. دابا نفس الكود = نفس الاختبارات
+      // من أي جهاز.
+      const examsSnap = await withTimeout(db.collection('exams').where('teacherId','==',myTeacherId).get(), 20000);
+      const results = await withTimeout(Promise.all(examsSnap.docs.map(async doc=>{
+        const id = doc.id;
         const data = doc.data();
         let submissions = [];
         let submissionsLoadFailed = false;
@@ -1345,7 +1475,7 @@ async function renderTeacherDashboard(){
       })), 30000);
       allExams = results.filter(Boolean);
       examsLoaded = true;
-      if(hadPartialError) toast('تعذّر تحميل بعض الاختبارات، تحقق من الاتصال بالإنترنت.');
+      if(hadPartialError) toast('تعذّر تحميل بعض الإجابات، تحقق من الاتصال بالإنترنت.');
     }catch(e){
       console.error(e);
       const retryHtml = `<div><span style="color:var(--red);">تعذّر تحميل الاختبارات (${esc(e.message||'')}).</span> <button class="btn btn-ghost" id="retryLoadExams" style="margin-right:8px;padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button></div>`;
@@ -1521,7 +1651,7 @@ function renderTeacherCreate(){
         ${levelSelectHTML('levelIn', d.level)}
       </div>
       <div class="field"><label>المادة</label>
-        <input type="text" id="subjectIn" value="${esc(d.subject)}" placeholder="مثلاً: اللغة العربية، الرياضيات، الفرنسية...">
+        ${subjectPickerHTML('subjectIn', d.subject)}
       </div>
       <div class="field"><label>عنوان الاختبار</label>
         <input type="text" id="titleIn" value="${esc(d.title)}" placeholder="مثلاً: اختبار الفصل الثالث"></div>
@@ -1532,10 +1662,10 @@ function renderTeacherCreate(){
         <input type="file" id="keyPdf" accept="application/pdf"></div>
       <button class="btn btn-primary btn-block" id="toStep2">استخراج الأسئلة بالذكاء الاصطناعي ⟵</button>
     `;
-    attachSuggestions(document.getElementById('subjectIn'), STANDARD_SUBJECTS);
+    wireSubjectPicker('subjectIn');
     document.getElementById('toStep2').onclick = async ()=>{
       d.level = document.getElementById('levelIn').value;
-      d.subject = document.getElementById('subjectIn').value.trim();
+      d.subject = getSubjectPickerValue('subjectIn');
       d.title = document.getElementById('titleIn').value.trim();
       const examFile = document.getElementById('examPdf').files[0];
       const keyFile = document.getElementById('keyPdf').files[0];
@@ -2034,11 +2164,6 @@ function renderTeacherCreate(){
           }
         }
         if(!saved) throw lastErr;
-        if(!editing){
-          const mine = JSON.parse(localStorage.getItem('myExams_v1')||'[]');
-          mine.unshift(examId);
-          localStorage.setItem('myExams_v1', JSON.stringify(mine));
-        }
         toast(editing? 'تم حفظ التعديلات ✅':'تم النشر ✅');
         go('teacherExamView', {examId});
       }catch(e){
@@ -2124,8 +2249,6 @@ async function renderTeacherExamView(){
     btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> جارٍ الحذف...`;
     try{
       await deleteExamCompletely(examId);
-      const stored = JSON.parse(localStorage.getItem('myExams_v1')||'[]').filter(x=>x!==examId);
-      localStorage.setItem('myExams_v1', JSON.stringify(stored));
       toast('تم حذف الاختبار ✅');
       go('teacherDashboard');
     }catch(e){
@@ -2714,6 +2837,8 @@ function render(){
     case 'teacherStudentResult': renderTeacherStudentResult(); break;
     case 'studentExam': renderStudentExam(); break;
     case 'studentResult': renderStudentResult(); break;
+    case 'adminGate': renderAdminGate(); break;
+    case 'adminPanel': renderAdminPanel(); break;
     default: renderLanding();
   }
 }
@@ -2769,10 +2894,104 @@ function wireInstallButton(id){
   btn.onclick = triggerInstallPrompt;
 }
 
+/* ============================= لوحة المشرف (مراقبة الأساتذة المسجَّلين) ============================= */
+// الوصول: افتحي الرابط وزيدي فالآخر ?admin=1 (مثلاً: https://your-app.com/?admin=1)
+// هاذ الرابط ماشي مكتوب فأي مكان فالواجهة — خاصك تحتفظي بيه أنتِ بوحدك.
+function renderAdminGate(){
+  app.innerHTML = `
+    ${Header('لوحة المشرف')}
+    <div class="card">
+      <p class="muted">هاذ الصفحة خاصة بيك أنتِ فقط لمراقبة الأساتذة المسجَّلين فالتطبيق.</p>
+      <div class="field"><label>كلمة السر</label>
+        <input type="password" id="adminPass" placeholder="••••••••"></div>
+      <button class="btn btn-primary btn-block" id="adminGo">دخول</button>
+      <div id="adminErr" style="color:var(--red);margin-top:10px;font-size:13px;"></div>
+    </div>
+    <a class="backlink" id="back" href="#">⟵ رجوع</a>
+  `;
+  document.getElementById('back').onclick=(e)=>{e.preventDefault(); go('landing');};
+  document.getElementById('adminGo').onclick = ()=>{
+    const v = document.getElementById('adminPass').value;
+    if(v === ADMIN_PASSWORD){
+      localStorage.setItem(ADMIN_KEY, '1');
+      go('adminPanel');
+    } else {
+      document.getElementById('adminErr').textContent = 'كلمة السر غير صحيحة.';
+    }
+  };
+}
+
+async function renderAdminPanel(){
+  if(localStorage.getItem(ADMIN_KEY) !== '1'){ go('adminGate'); return; }
+  if(!initFirebase()){ go('setup'); return; }
+  app.innerHTML = `
+    ${Header('لوحة المشرف')}
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <h3 style="margin:0;">👥 الأساتذة المسجَّلون</h3>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-ghost" id="refreshAdmin" style="padding:8px 12px;">🔄</button>
+          <a href="#" id="adminLogout" class="backlink" style="align-self:center;">تسجيل الخروج</a>
+        </div>
+      </div>
+      <div id="adminBody" class="muted" style="margin-top:14px;">جارٍ التحميل...</div>
+    </div>
+    <a class="backlink" id="back" href="#">⟵ رجوع</a>
+  `;
+  document.getElementById('back').onclick=(e)=>{e.preventDefault(); go('landing');};
+  document.getElementById('adminLogout').onclick = (e)=>{ e.preventDefault(); localStorage.removeItem(ADMIN_KEY); go('adminGate'); };
+  document.getElementById('refreshAdmin').onclick = loadAdminData;
+
+  const body = document.getElementById('adminBody');
+  async function loadAdminData(){
+    body.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل لائحة الأساتذة...</div>';
+    try{
+      const teachersSnap = await withTimeout(db.collection('teachers').orderBy('createdAt','desc').get(), 15000);
+      const teachers = teachersSnap.docs.map(d=>({ code:d.id, createdAt:d.data().createdAt }));
+      if(teachers.length===0){
+        body.innerHTML = '<p class="muted">لا يوجد أي أستاذ(ة) مسجَّل بعد.</p>';
+        return;
+      }
+      body.innerHTML = `<p class="pill" style="margin-bottom:14px;">📊 العدد الإجمالي: ${teachers.length} أستاذ(ة)</p>
+        <table>
+          <thead><tr><th>الكود</th><th>تاريخ التسجيل</th><th>عدد الاختبارات</th></tr></thead>
+          <tbody id="adminRows"></tbody>
+        </table>`;
+      const tbody = document.getElementById('adminRows');
+      // نعرضو صف لكل أستاذ فورًا بالتاريخ، ونجيبو عدد اختباراته بشكل منفصل (خطأ فواحد ما
+      // كيوقفش عرض الباقي)
+      teachers.forEach(t=>{
+        const dateStr = t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString('ar-DZ') : '—';
+        const tr = el(`<tr>
+          <td dir="ltr" style="text-align:right;">${esc(t.code)}</td>
+          <td>${esc(dateStr)}</td>
+          <td id="cnt-${esc(t.code)}">...</td>
+        </tr>`);
+        tbody.appendChild(tr);
+      });
+      await Promise.all(teachers.map(async t=>{
+        const cell = document.getElementById('cnt-'+t.code);
+        if(!cell) return;
+        try{
+          const examsSnap = await withTimeout(db.collection('exams').where('teacherId','==',t.code).get(), 15000);
+          cell.textContent = examsSnap.size;
+        }catch(e){ cell.textContent = '—'; }
+      }));
+    }catch(e){
+      body.innerHTML = `<div><span style="color:var(--red);">تعذّر تحميل لائحة الأساتذة (${esc(e.message||'')}).</span> <button class="btn btn-ghost" id="retryAdmin" style="margin-right:8px;padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button></div>`;
+      const rb = document.getElementById('retryAdmin');
+      if(rb) rb.onclick = loadAdminData;
+    }
+  }
+  loadAdminData();
+}
+
 /* ============================= BOOT ============================= */
 (function boot(){
   tryImportCfgFromUrl();
-  if(state.examId){
+  if(params.get('admin')==='1'){
+    go('adminGate');
+  } else if(state.examId){
     if(initFirebase()){ go('studentExam', {examId: state.examId}); }
     else {
       app.innerHTML = `${Header()}<div class="card">
