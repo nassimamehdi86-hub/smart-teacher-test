@@ -433,7 +433,7 @@ function esc(s){ return (s??'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;',
 // مواد اللغات الأجنبية (فرنسية/إنجليزية): نصوصها ونصوص أسئلتها لازم تتصوّر من اليسار لليمين (LTR)
 // حتى لو كانت الصفحة كاملة RTL، وإلا كيبان الترتيب معكوسًا فالطباعة والتصحيح.
 function isLtrSubject(subject){
-  return /فرنس|إنجليز|انجليز|french|english/i.test(subject||'');
+  return /فرنس|إنجليز|انجليز|french|english|رياضيات|فيزياء|علوم|math|physic|scien/i.test(subject||'');
 }
 function dirAttr(subject){ return isLtrSubject(subject) ? ' dir="ltr"' : ''; }
 // كلمات مساعدة ("السؤال"، "ن" للنقطة، "الاسم"...) خاصها تتبدل بلغة الاختبار نفسها فورقة الطباعة/التصحيح
