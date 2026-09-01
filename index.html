@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Smart Teacher — المعلم الذكي</title>
-<meta name="description" content="منصّة اختبارات ذكية: يُنشئ الأستاذ(ة) الاختبار، ويطبعه التلميذ(ة) ويجيب عليه ويصوّره، ويظهر التصحيح فورًا.">
+<meta name="description" content="منصّة اختبارات ذكية: يُنشئ الأستاذ الاختبار، ويطبعه التلميذ ويجيب عليه ويصوّره، ويظهر التصحيح فورًا.">
 <meta name="theme-color" content="#efe3bf">
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png" type="image/png">
@@ -357,9 +357,9 @@
 <script>
 /* ============================= CONFIG / AI PROXY ============================= */
 // رابط Cloudflare Worker الخاص بهذه النسخة من التطبيق (كل زبون له Worker خاص به).
-// إذا كانت هذه نسخة "قالب" فارغة، اتركي القيمة فارغة "" — سيُطلب من المستخدم إدخالها
+// إذا كانت هذه نسخة "قالب" فارغة، اترك القيمة فارغة "" — سيُطلب من المستخدم إدخالها
 // عبر شاشة الإعداد أول مرة يفتح التطبيق، وستُحفظ في متصفحه فقط.
-const DEFAULT_CLAUDE_API_URL = "https://bold-haze-0198.mehdinassima86.workers.dev/";
+const DEFAULT_CLAUDE_API_URL = "https://still-pine-b421.nassimamehdi86.workers.dev/";
 const WORKER_URL_KEY = 'examPlatform_workerUrl_v1';
 function getClaudeApiUrl(){
   return localStorage.getItem(WORKER_URL_KEY) || DEFAULT_CLAUDE_API_URL;
@@ -368,39 +368,23 @@ function getClaudeApiUrl(){
 /* ============================= CONFIG / FIREBASE ============================= */
 const FB_KEY = 'examPlatform_firebaseConfig_v1';
 const TID_KEY = 'examPlatform_teacherId_v1';
-// ⚠️ لوحة المشرف: هاذ الكلمة السرية مكتوبة مباشرة فكود الصفحة، يعني أي واحد يفتح "عرض مصدر
-// الصفحة" (View Source) فالمتصفح يقدر يشوفها. هذا كافٍ فقط باش تمنعي التلاميذ أو الأساتذة
-// العاديين من الدخول بالصدفة — بدّليها بكلمة خاصة بيك قبل النشر، وماشي حماية حقيقية ضد شخص
-// يعرف كيفاش يفتح أدوات المطوّر.
-const ADMIN_PASSWORD = 'غيّري_هذه_الكلمة_2026';
-const ADMIN_KEY = 'examPlatform_isAdmin_v1';
 let db = null;
 
 // Baked in so this specific copy works without manual setup. For a blank sellable
 // template, set this to null — each buyer will then be guided through setup.
 const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyC9QziCOblfNiXj4CIERmHwKF67w7JD72A",
-  authDomain: "exams-ustad2.firebaseapp.com",
-  projectId: "exams-ustad2",
-  storageBucket: "exams-ustad2.firebasestorage.app",
-  messagingSenderId: "318757828857",
-  appId: "1:318757828857:web:badac6280b4d36bc1c8a28"
+  apiKey: "AIzaSyBiTSNnL3HTMs0aensY6tF0YZFItE4HVqw",
+  authDomain: "exams-platform-265ab.firebaseapp.com",
+  projectId: "exams-platform-265ab",
+  storageBucket: "exams-platform-265ab.firebasestorage.app",
+  messagingSenderId: "31206634879",
+  appId: "1:31206634879:web:2c823c76d2085d538e964a"
 };
 
-// دابا الكود ديال الأستاذ(ة) يتحدد يدويًا (يختاروه أو يدخلوه) من شاشة الدخول، وماشي عشوائيًا
-// بصمت بحال قبل — هذا هو اللي كيسمح لنفس الأستاذ(ة) يدخل لحسابه من أي جهاز بنفس الكود، وكيربط
-// كل اختباراته بحساب واحد بدل ما تبقى مرتبطة بجهاز معيّن (localStorage) وتضيع عند تبديل الجهاز.
 function getTeacherId(){
-  return (localStorage.getItem(TID_KEY) || '').trim();
-}
-function setTeacherId(code){
-  localStorage.setItem(TID_KEY, code);
-}
-function clearTeacherId(){
-  localStorage.removeItem(TID_KEY);
-}
-function normalizeTeacherCode(s){
-  return (s||'').toString().trim().toLowerCase().replace(/\s+/g,'');
+  let t = localStorage.getItem(TID_KEY);
+  if(!t){ t = 'ust_' + Math.random().toString(36).slice(2,10); localStorage.setItem(TID_KEY, t); }
+  return t;
 }
 
 function isFullyConfigured(){
@@ -444,53 +428,16 @@ function tryImportCfgFromUrl(){
 }
 
 /* ============================= HELPERS ============================= */
-function el(html){
-  html = html.trim();
-  const m = /^<([a-zA-Z0-9-]+)/.exec(html);
-  const tag = m ? m[1].toLowerCase() : '';
-  const wrap = document.createElement('div');
-  if(tag === 'tr'){
-    wrap.innerHTML = `<table><tbody>${html}</tbody></table>`;
-    return wrap.firstChild.firstChild.firstChild;
-  }
-  if(tag === 'td' || tag === 'th'){
-    wrap.innerHTML = `<table><tbody><tr>${html}</tr></tbody></table>`;
-    return wrap.firstChild.firstChild.firstChild.firstChild;
-  }
-  if(tag === 'option'){
-    wrap.innerHTML = `<select>${html}</select>`;
-    return wrap.firstChild.firstChild;
-  }
-  wrap.innerHTML = html;
-  return wrap.firstChild;
-}
+function el(html){ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstChild; }
 function esc(s){ return (s??'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-// يوحّد الاختلافات الشائعة فكتابة العربية (الهمزات، التاء المربوطة، الألف المقصورة، التطويل،
-// الحركات، والمسافات الزائدة) باش البحث بالمادة/المستوى يخدم حتى لو كتب الأستاذ(ة) الصيغة
-// بشكل مختلف شوية عن الاختبار الأصلي (مثلاً "لغة عربية" بدل "اللغة العربية").
-function normalizeArabic(s){
-  return (s||'').toString()
-    .replace(/[\u064B-\u0652\u0670\u0640]/g, '') // حركات وتنوين وتطويل
-    .replace(/[إأآٱ]/g, 'ا')
-    .replace(/ى/g, 'ي')
-    .replace(/ة/g, 'ه')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-function textMatches(haystack, needle){
-  const h = normalizeArabic(haystack), n = normalizeArabic(needle);
-  if(!n) return true;
-  return h.includes(n) || n.includes(h);
-}
 // مواد اللغات الأجنبية (فرنسية/إنجليزية): نصوصها ونصوص أسئلتها لازم تتصوّر من اليسار لليمين (LTR)
 // حتى لو كانت الصفحة كاملة RTL، وإلا كيبان الترتيب معكوسًا فالطباعة والتصحيح.
 function isLtrSubject(subject){
-  return /فرنس|إنجليز|انجليز|french|english/i.test(subject||'');
+  return /فرنس|إنجليز|انجليز|french|english|رياضيات|فيزياء|علوم|math|physic|scien/i.test(subject||'');
 }
 function dirAttr(subject){ return isLtrSubject(subject) ? ' dir="ltr"' : ''; }
 // كلمات مساعدة ("السؤال"، "ن" للنقطة، "الاسم"...) خاصها تتبدل بلغة الاختبار نفسها فورقة الطباعة/التصحيح
-// (فرنسية أو إنجليزية)، حتى لو كانت باقي واجهة التطبيق للأستاذ(ة) بالعربية.
+// (فرنسية أو إنجليزية)، حتى لو كانت باقي واجهة التطبيق للأستاذ بالعربية.
 function examLabels(subject){
   if(/فرنس|french/i.test(subject||'')) return { question:'Question', pt:'pt', nameLabel:'Nom :', outOf:'sur', points:'points' };
   if(/إنجليز|انجليز|english/i.test(subject||'')) return { question:'Question', pt:'pt', nameLabel:'Name:', outOf:'out of', points:'points' };
@@ -542,7 +489,7 @@ function sheetWatermarkHTML(){
 function sheetFooterBrandHTML(){
   return `<div class="sheet-footer-brand"><img src="icon-192.png" alt=""> أُنشئ عبر تطبيق المعلّم الذكي</div>`;
 }
-// يبني بطاقة تفاصيل سؤال واحد فشاشة النتيجة (عند التلميذ(ة) وعند الأستاذ(ة)): إجابة التلميذ فسطر،
+// يبني بطاقة تفاصيل سؤال واحد فشاشة النتيجة (عند التلميذ وعند الأستاذ): إجابة التلميذ فسطر،
 // والإجابة الصحيحة (النموذجية) فسطر موالي بلون أخضر، ثم الملاحظة إن وُجدت.
 function qaBlockHTML(q, examData){
   const byNumber = {};
@@ -559,7 +506,7 @@ function qaBlockHTML(q, examData){
 }
 function uid(n=6){ const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let s=''; for(let i=0;i<n;i++) s+=c[Math.floor(Math.random()*c.length)]; return s; }
 // كيلف أي Promise بمهلة زمنية: إلا طوّل (مثلاً بسبب مشكل CORS فـ Storage) نلغيو الانتظار
-// باش النشر مايبقاش واقف، ونكملو النشر بلا الملف الأصلي بدل ما نخليو الأستاذ(ة) ينتظر بلا حدود.
+// باش النشر مايبقاش واقف، ونكملو النشر بلا الملف الأصلي بدل ما نخليو الأستاذ ينتظر بلا حدود.
 function withTimeout(promise, ms, onTimeout){
   return Promise.race([
     promise,
@@ -856,7 +803,6 @@ async function renderLanding(){
     </div>
     <div class="card">
       <h3 style="margin-top:0;">🔍 ابحث عن اختبارك</h3>
-      <div id="scopeNotice"></div>
       <div class="row">
         <div class="field" style="flex:1;min-width:140px;">${levelSelectHTML('lvSelLanding','')}</div>
         <div class="field" style="flex:1;min-width:140px;">${subjectSelectHTML('subjSelLanding','')}</div>
@@ -867,7 +813,7 @@ async function renderLanding(){
       <a href="#" id="showHidden" class="backlink" style="display:none;">إظهار الاختبارات المخفية</a>
     </div>
     <div class="center" style="margin-top:10px;">
-      <a href="#" id="teacherLink" class="backlink">🔒 لوحة الأستاذ(ة)</a>
+      <a href="#" id="teacherLink" class="backlink">🔒 لوحة الأستاذ</a>
     </div>
   `;
   document.getElementById('teacherLink').onclick = (e)=>{ e.preventDefault(); go('teacherGate'); };
@@ -879,58 +825,29 @@ async function renderLanding(){
   const lvSel = document.getElementById('lvSelLanding');
   const subjSel = document.getElementById('subjSelLanding');
   let hidden = getHiddenExams();
-  let reqToken = 0;
-  // إلا كان الرابط فيه ?t=كود_الأستاذ(ة)، البحث كيبقى محصورًا فاختبارات هذا الأستاذ(ة) فقط —
-  // هذا هو الرابط اللي كل أستاذ(ة) كيشارك مع تلاميذه (زر "نسخ" فلوحة الأستاذ(ة)).
-  const scopeTeacherId = new URLSearchParams(location.search).get('t') || null;
-  if(scopeTeacherId){
-    document.getElementById('scopeNotice').innerHTML = `<p class="muted" style="margin-top:-4px;">📚 تعرضين هنا اختبارات أستاذ(ة) محدَّد فقط.</p>`;
-  }
+  let allDocs = [];
+  let dataLoaded = false;
 
-  // مهم: البحث دابا كيسولف مباشرة من القاعدة بالمادة والمستوى المختارين (بدل ما يجيب فقط
-  // آخر 50 اختبار فالتطبيق كامل ويصفّي محليًا). القيد القديم (limit 50) كان كيخبّي أي اختبار
-  // أقدم من آخر 50 اختبار تم إنشاؤه — حتى لو مطابق تمامًا للاختيار — وهذا كان سبب "أحيانًا
-  // ما كيبانش رغم أنه كاين". فلترة بـ where() فقط (بلا orderBy على حقل مختلف) ما كتحتاجش
-  // أي فهرس إضافي فFirebase.
-  async function renderFeed(){
+  function renderFeed(){
     const lv = lvSel.value, sj = subjSel.value;
     showHiddenLink.style.display = hidden.length>0 ? 'inline' : 'none';
-    // إلا كان الرابط مخصوصًا بأستاذ(ة) معيّن، نعرضو كل اختباراتو مباشرة بلا ما نجبرو اختيار
-    // مادة/مستوى أولاً (الكتالوج أصلاً محصور ومحدود). فالبحث العام (بلا ?t=)، لازم على الأقل
-    // فلتر وحد باش ما نديرو استعلام مفتوح على كل الاختبارات.
-    if(!scopeTeacherId && !lv && !sj){
-      feed.innerHTML = '<p class="muted">اختاري المستوى و/أو المادة أعلاه لعرض الاختبارات المتاحة.</p>';
+    if(!lv && !sj){
+      feed.innerHTML = '<p class="muted">اختر المستوى و/أو المادة أعلاه لعرض الاختبارات المتاحة.</p>';
       return;
     }
-    const myToken = ++reqToken;
-    feed.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
-    let query = db.collection('exams');
-    if(scopeTeacherId) query = query.where('teacherId','==',scopeTeacherId);
-    if(lv) query = query.where('level','==',lv);
-    if(sj) query = query.where('subject','==',sj);
-    query = query.limit(300);
-    let snap;
-    try{
-      try{
-        // نجبرو القراءة من السيرفر مباشرة (مو الكاش المحلي) باش الاختبار الجديد المنشور يبان مباشرة
-        snap = await withTimeout(query.get({source:'server'}), 15000);
-      }catch(serverErr){
-        snap = await withTimeout(query.get(), 15000);
-      }
-    }catch(e){
-      if(myToken !== reqToken) return; // المستخدم بدّل الاختيار قبل ما توصل النتيجة، نتجاهلها
-      feed.innerHTML = `<div><span style="color:var(--red);">تعذّر جلب قائمة الاختبارات (${esc(e.message||'')}).</span> <button class="btn btn-ghost" id="retryFeed" style="margin-right:8px;padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button></div>`;
-      const rb = document.getElementById('retryFeed');
-      if(rb) rb.onclick = renderFeed;
+    // إلا مازال التحميل الأول من قاعدة البيانات ماكملش، نبينو سبينر بدل "لا توجد نتائج" المضلّلة
+    if(!dataLoaded){
+      feed.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
       return;
     }
-    if(myToken !== reqToken) return;
-    const docs = snap.docs.slice().sort((a,b)=>{
-      const ta = a.data().createdAt?.seconds || 0, tb = b.data().createdAt?.seconds || 0;
-      return tb - ta;
+    const matched = allDocs.filter(doc=>{
+      const ex = doc.data();
+      if(lv && ex.level!==lv) return false;
+      if(sj && ex.subject!==sj) return false;
+      return true;
     });
-    const visibleDocs = docs.filter(d=>!hidden.includes(d.id));
-    if(docs.length===0){
+    const visibleDocs = matched.filter(d=>!hidden.includes(d.id));
+    if(matched.length===0){
       feed.innerHTML = '<p class="muted">لا توجد اختبارات مطابقة لهذا الاختيار حاليًا.</p>';
       return;
     }
@@ -969,104 +886,71 @@ async function renderLanding(){
     localStorage.setItem(HIDDEN_KEY, JSON.stringify([]));
     renderFeed();
   };
-  if(scopeTeacherId) renderFeed();
+
+  try{
+    const scopedTeacherId = params.get('t'); // إلا كان الرابط فيه ?t=teacherId، نبينو غير اختبارات هاذ الأستاذ
+    let snap;
+    try{
+      // نجبرو القراءة من السيرفر مباشرة (مو الكاش المحلي) باش الاختبار الجديد المنشور يبان مباشرة
+      // بلا تقطّع، حتى لو كان الكاش المحلي قديم أو ناقص.
+      let q = db.collection('exams');
+      q = scopedTeacherId ? q.where('teacherId','==', scopedTeacherId) : q.orderBy('createdAt','desc');
+      snap = await q.limit(50).get({source:'server'});
+    }catch(serverErr){
+      let q2 = db.collection('exams');
+      q2 = scopedTeacherId ? q2.where('teacherId','==', scopedTeacherId) : q2.orderBy('createdAt','desc');
+      snap = await q2.limit(50).get();
+    }
+    allDocs = snap.docs;
+    dataLoaded = true;
+    renderFeed();
+  }catch(e){
+    feed.innerHTML = `<p style="color:var(--red);">تعذّر جلب قائمة الاختبارات (${esc(e.message||'')}).</p>`;
+  }
 }
 
-/* ============================= TEACHER GATE (حساب الأستاذ(ة) بكود بسيط) ============================= */
-// ⚠️ ملاحظة أمان مهمة: هذا نظام "كود بسيط" لتجربة تمهيدية سريعة، وليس تسجيل دخول حقيقي (بحال
-// Firebase Authentication). الكود كيميّز اختبارات كل أستاذ(ة) فواجهة التطبيق، لكن ما كاينش أي
-// تحقق من هوية حقيقي على مستوى الخادم — تقنيًا، شخص يعرف كود أستاذ(ة) آخر (أو يعدّل الكود يدويًا
-// من أدوات المطوّر فالمتصفح) يقدر يشوف أو يعدّل اختباراته. مناسب لتجربة بين مجموعة أساتذة موثوقين،
-// وغير مناسب لإطلاق عمومي بلا ترقية لاحقة لتسجيل دخول حقيقي (بريد إلكتروني + كلمة سر).
-// يهجّر الاختبارات القديمة (اللي تصاوبات قبل نظام الحسابات هاذ، وكانت مرتبطة بهاذ الجهاز فقط
-// عبر لائحة محلية قديمة اسمها myExams_v1) ويربطها بكود الحساب الحالي — مرة وحدة، وبلا ما
-// يبدّل ملكية أي اختبار مرتبط بالفعل بحساب آخر (نتأكد أولاً أنه ماعندوش teacherId مسجّل).
-async function migrateLegacyExamsIfNeeded(code){
-  try{
-    const legacyIds = JSON.parse(localStorage.getItem('myExams_v1')||'[]');
-    if(!Array.isArray(legacyIds) || legacyIds.length===0) return;
-    await Promise.allSettled(legacyIds.map(async id=>{
-      const ref = db.collection('exams').doc(id);
-      const doc = await withTimeout(ref.get(), 12000);
-      if(doc.exists && !doc.data().teacherId){
-        await withTimeout(ref.set({teacherId: code}, {merge:true}), 12000);
-      }
-    }));
-    localStorage.removeItem('myExams_v1');
-  }catch(e){ console.error('legacy exam migration failed', e); }
-}
+/* ============================= TEACHER PIN GATE ============================= */
+const PIN_KEY = 'examPlatform_teacherPin_v1';
 function renderTeacherGate(){
-  const myId = getTeacherId();
-  if(myId){
-    if(!initFirebase()){ go('setup'); return; }
-    go('teacherDashboard');
-    return;
-  }
+  const hasPin = !!localStorage.getItem(PIN_KEY);
   app.innerHTML = `
-    ${Header('لوحة الأستاذ(ة)')}
+    ${Header('لوحة الأستاذ')}
     <div class="card">
-      <p class="muted">أدخل كود حسابك إلا كان عندك من قبل، أو أنشئ كودًا جديدًا لأول مرة. هذا الكود هو اللي كيميّز اختباراتك عن باقي الأساتذة — احتفظي به جيدًا، وتقدري تدخلي بيه من أي جهاز.</p>
-      <div class="field"><label>كود الأستاذ(ة)</label>
-        <input type="text" id="tCodeIn" placeholder="مثلاً: ahmed2026" autocapitalize="off" autocorrect="off"></div>
-      <div class="row" style="margin-top:10px;">
-        <button class="btn btn-primary" id="tLogin" style="flex:1;">دخول بكود موجود</button>
-        <button class="btn btn-gold" id="tCreate" style="flex:1;">إنشاء حساب جديد بهذا الكود</button>
-      </div>
-      <div id="tErr" style="color:var(--red);margin-top:10px;font-size:13px;"></div>
+      ${hasPin ? `
+        <div class="field"><label>الرمز السري (PIN)</label>
+          <input type="text" id="pinIn" inputmode="numeric" maxlength="8" placeholder="••••"></div>
+        <button class="btn btn-primary btn-block" id="pinGo">دخول</button>
+      ` : `
+        <p class="muted">هذه أول مرة تدخل فيها إلى لوحة الأستاذ من هذا الجهاز. يُرجى إنشاء رمز سري قصير (4 أرقام مثلاً) لحماية اللوحة من التلاميذ.</p>
+        <div class="field"><label>اختر رمزًا سريًا جديدًا</label>
+          <input type="text" id="pinNew" inputmode="numeric" maxlength="8" placeholder="مثلاً: 2580"></div>
+        <button class="btn btn-primary btn-block" id="pinSet">حفظ ومتابعة</button>
+      `}
+      <div id="pinErr" style="color:var(--red);margin-top:10px;font-size:13px;"></div>
     </div>
     <a class="backlink" id="back" href="#">⟵ رجوع</a>
   `;
   document.getElementById('back').onclick=(e)=>{e.preventDefault(); go('landing');};
-  if(!initFirebase()){ go('setup'); return; }
-
-  const errBox = document.getElementById('tErr');
-  document.getElementById('tLogin').onclick = async ()=>{
-    const code = normalizeTeacherCode(document.getElementById('tCodeIn').value);
-    if(!code){ errBox.textContent = 'يرجى إدخال الكود.'; return; }
-    errBox.textContent = '';
-    const btn = document.getElementById('tLogin');
-    const originalLabel = btn.textContent;
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> جارٍ التحقق...';
-    try{
-      const doc = await withTimeout(db.collection('teachers').doc(code).get(), 12000);
-      if(!doc.exists){
-        errBox.textContent = 'هذا الكود غير مسجَّل. إلا كانت هذي أول مرة، استعملي "إنشاء حساب جديد".';
-        btn.disabled = false; btn.textContent = originalLabel;
-        return;
+  if(hasPin){
+    document.getElementById('pinGo').onclick = ()=>{
+      const v = document.getElementById('pinIn').value.trim();
+      if(v && v === localStorage.getItem(PIN_KEY)){
+        if(!initFirebase()){ go('setup'); return; }
+        go('teacherDashboard');
+      } else {
+        document.getElementById('pinErr').textContent = 'الرمز غير صحيح.';
       }
-      setTeacherId(code);
-      await migrateLegacyExamsIfNeeded(code);
+    };
+  } else {
+    document.getElementById('pinSet').onclick = ()=>{
+      const v = document.getElementById('pinNew').value.trim();
+      if(!v || v.length<4){ document.getElementById('pinErr').textContent = 'يرجى إدخال رمز مكوّن من 4 أرقام على الأقل.'; return; }
+      localStorage.setItem(PIN_KEY, v);
+      toast('تم تسجيل الرمز ✅ يرجى الاحتفاظ به جيدًا');
+      if(!initFirebase()){ go('setup'); return; }
       go('teacherDashboard');
-    }catch(e){
-      errBox.textContent = `تعذّر التحقق من الكود (${esc(e.message||'')}).`;
-      btn.disabled = false; btn.textContent = originalLabel;
-    }
-  };
-  document.getElementById('tCreate').onclick = async ()=>{
-    const code = normalizeTeacherCode(document.getElementById('tCodeIn').value);
-    if(!code || code.length<3){ errBox.textContent = 'يرجى اختيار كود من 3 حروف/أرقام على الأقل.'; return; }
-    errBox.textContent = '';
-    const btn = document.getElementById('tCreate');
-    const originalLabel = btn.textContent;
-    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> جارٍ الإنشاء...';
-    try{
-      const ref = db.collection('teachers').doc(code);
-      const existing = await withTimeout(ref.get(), 12000);
-      if(existing.exists){
-        errBox.textContent = 'هذا الكود مستعمل من طرف حساب آخر. جربي كودًا مختلفًا، أو ادخلي بزر "دخول بكود موجود" إلا كان هو حسابك.';
-        btn.disabled = false; btn.textContent = originalLabel;
-        return;
-      }
-      await withTimeout(ref.set({ createdAt: firebase.firestore.FieldValue.serverTimestamp() }), 12000);
-      setTeacherId(code);
-      await migrateLegacyExamsIfNeeded(code);
-      toast('تم إنشاء حسابك ✅ احتفظي بالكود جيدًا');
-      go('teacherDashboard');
-    }catch(e){
-      errBox.textContent = `تعذّر إنشاء الحساب (${esc(e.message||'')}).`;
-      btn.disabled = false; btn.textContent = originalLabel;
-    }
-  };
+    };
+  }
 }
 
 /* ============================= FIREBASE / WORKER SETUP SCREEN ============================= */
@@ -1152,82 +1036,36 @@ function subjectSelectHTML(id, selected){
   </select>`;
 }
 
-// نسخة مخصّصة لشاشة إنشاء/تعديل الاختبار: قائمة منسدلة مقفلة (بلا كتابة حرة) لضمان أن كل
-// اختبار جديد يُسجَّل بنفس القيمة الحرفية بالضبط المستعملة فالبحث (عند التلميذ والأستاذ)،
-// مع خيار "أخرى" فقط للمواد الاستثنائية أو القيم القديمة المخزَّنة بصيغة غير قياسية.
-function subjectPickerHTML(id, selected){
-  const isCustom = !!selected && !STANDARD_SUBJECTS.includes(selected);
-  return `
-    <select id="${id}">
-      <option value="" ${!selected?'selected':''}>اختر المادة...</option>
-      ${STANDARD_SUBJECTS.map(s=>`<option value="${esc(s)}" ${selected===s?'selected':''}>${esc(s)}</option>`).join('')}
-      <option value="__other__" ${isCustom?'selected':''}>مادة أخرى (اكتب يدويًا)</option>
-    </select>
-    <input type="text" id="${id}_other" placeholder="اكتب اسم المادة يدويًا..." value="${isCustom?esc(selected):''}" style="margin-top:8px;${isCustom?'':'display:none;'}">
-  `;
-}
-function wireSubjectPicker(id){
-  const sel = document.getElementById(id);
-  const other = document.getElementById(id+'_other');
-  if(!sel || !other) return;
-  sel.onchange = ()=>{ other.style.display = sel.value==='__other__' ? '' : 'none'; if(sel.value==='__other__') other.focus(); };
-}
-function getSubjectPickerValue(id){
-  const sel = document.getElementById(id);
-  if(!sel) return '';
-  if(sel.value==='__other__'){
-    const other = document.getElementById(id+'_other');
-    return (other && other.value || '').trim();
-  }
-  return sel.value;
-}
-
 async function renderTeacherDashboard(){
-  const myTeacherId = getTeacherId();
-  if(!myTeacherId){ go('teacherGate'); return; }
-  const catalogLink = `${location.origin}${location.pathname}?t=${encodeURIComponent(myTeacherId)}`;
+  const mine = JSON.parse(localStorage.getItem('myExams_v1')||'[]');
+  const myLink = `${location.origin}${location.pathname}?t=${getTeacherId()}`;
   app.innerHTML = `
-    ${Header('لوحة الأستاذ(ة)')}
+    ${Header('لوحة الأستاذ')}
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <span class="pill">🔑 حسابك: ${esc(myTeacherId)}</span>
-        <a href="#" id="switchAccount" class="backlink" style="font-size:12px;">تبديل الحساب</a>
-      </div>
-      <div class="row" style="margin-top:10px;align-items:center;">
-        <div class="field" style="flex:1;min-width:180px;">
-          <label>🔗 رابط اختباراتك (شاركيه مع تلاميذك ليتصفّحوا كل اختباراتك)</label>
-          <input type="text" id="catalogLinkBox" value="${esc(catalogLink)}" readonly style="direction:ltr;">
-        </div>
-        <button class="btn btn-ghost" id="copyCatalogLink" style="padding:10px 14px;align-self:flex-end;">نسخ</button>
+      <h3 style="margin-top:0;">🔗 رابطك الخاص لتلاميذك</h3>
+      <p class="muted">إن كنت تشارك نفس التطبيق مع أستاذ آخر أو أكثر، فهذا الرابط يعرض اختباراتك أنت فقط (لا اختبارات الجميع). شاركه مع تلاميذك بدل الرابط العادي.</p>
+      <div class="link-box">
+        <input type="text" readonly value="${myLink}" id="myTeacherLink">
+        <button class="btn btn-ghost" id="copyMyLink" style="padding:8px 12px;">نسخ</button>
       </div>
     </div>
     <div class="card">
       <div class="tabbar">
         <button class="tabbtn active" data-tab="exams">اختباراتي</button>
-        <button class="tabbtn" data-tab="archive">📄 نتائج تلاميذي</button>
+        <button class="tabbtn" data-tab="archive">📄 حلول تلاميذي</button>
       </div>
 
       <div class="tabpanel active" id="tab-exams">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
           <h3 style="margin:0;">اختباراتي</h3>
-          <div style="display:flex;gap:8px;">
-            <button class="btn btn-ghost" id="refreshExams" title="تحديث اللائحة" style="padding:10px 14px;">🔄</button>
-            <button class="btn btn-primary" id="newExam">+ اختبار جديد</button>
-          </div>
+          <button class="btn btn-primary" id="newExam">+ اختبار جديد</button>
         </div>
-        <p class="muted" style="margin-top:10px;">جميع اختباراتك تظهر هنا. اضغط على أي اختبار لمعاينته أو الحصول على رابط مشاركته أو حذفه.</p>
-        <div class="row" style="margin-top:10px;">
-          <div class="field"><label>المادة</label>
-            <input type="text" id="subjectSearchExams" placeholder="مثلاً: الرياضيات..."></div>
-          <div class="field"><label>المستوى</label>
-            <input type="text" id="levelSearchExams" placeholder="مثلاً: السنة الأولى متوسط..."></div>
-        </div>
-        <div id="examsListMine" class="muted" style="margin-top:14px;">جارٍ التحميل...</div>
+        <p class="muted" style="margin-top:12px;">أنشئ اختبارًا جديدًا هنا، أو انتقل لتبويبة "حلول تلاميذي" لمعاينة إجابات التلاميذ ونقطهم وتصحيحهم بصيغة PDF.</p>
       </div>
 
       <div class="tabpanel" id="tab-archive">
-        <h3 style="margin-top:0;">📄 نتائج تلاميذي</h3>
-        <p class="muted">تظهر هنا حصريًا الاختبارات التي أجاب عنها تلميذ واحد على الأقل. ابحث بالمادة أو المستوى، ثم اختر الاختبار لعرض لائحة التلاميذ وأسماءهم ونقطهم وحلولهم.</p>
+        <h3 style="margin-top:0;">📄 حلول تلاميذي</h3>
+        <p class="muted">ابحث عن الموضوع بالمادة أو المستوى، ثم اختر الموضوع لعرض لائحة التلاميذ الذين أجابوا مع نقطهم وتصحيحهم.</p>
         <div class="row">
           <div class="field"><label>المادة</label>
             <input type="text" id="subjectSearch" placeholder="مثلاً: الرياضيات..."></div>
@@ -1239,18 +1077,11 @@ async function renderTeacherDashboard(){
       </div>
     </div>
   `;
+  document.getElementById('copyMyLink').onclick = ()=>{
+    navigator.clipboard.writeText(myLink);
+    toast('تم نسخ رابطك الخاص ✅');
+  };
   document.getElementById('newExam').onclick = ()=> go('teacherCreate', {draft:newDraft()});
-  document.getElementById('refreshExams').onclick = ()=> loadAllExams();
-  document.getElementById('copyCatalogLink').onclick = ()=>{
-    navigator.clipboard.writeText(catalogLink);
-    toast('تم نسخ الرابط ✅');
-  };
-  document.getElementById('switchAccount').onclick = (e)=>{
-    e.preventDefault();
-    if(!confirm('تبديل الحساب غادي يسجّل خروجك من الكود الحالي فهذا الجهاز. متأكدة؟')) return;
-    clearTeacherId();
-    go('teacherGate');
-  };
 
   const tabBtns = document.querySelectorAll('.tabbtn');
   tabBtns.forEach(btn=>{
@@ -1262,20 +1093,88 @@ async function renderTeacherDashboard(){
     };
   });
 
-  const listBoxMine = document.getElementById('examsListMine');
   const listBox = document.getElementById('examsList');
   const subPanel = document.getElementById('submissionsPanel');
+  const searchBox = document.getElementById('subjectSearch');
+  const levelBox = document.getElementById('levelSearch');
+  attachSuggestions(levelBox, ALL_LEVELS, (val)=> renderGrouped(searchBox.value, val));
+  attachSuggestions(searchBox, STANDARD_SUBJECTS, (val)=> renderGrouped(val, levelBox.value));
+
+  if(mine.length===0){ listBox.innerHTML = 'لا توجد اختبارات بعد. اضغط على "اختبار جديد" للبدء.'; return; }
 
   let allExams = [];
   let examsLoaded = false;
+  try{
+    const results = await Promise.all(mine.map(async id=>{
+      try{
+        const doc = await db.collection('exams').doc(id).get();
+        if(!doc.exists) return null;
+        const data = doc.data();
+        return { id, title: data.title||id, level: data.level||'', subject: data.subject||'بلا مادة', questionsCount: data.questions?.length||0, totalPoints: data.totalPoints||0, examData: data };
+      }catch(e){ return null; }
+    }));
+    allExams = results.filter(Boolean);
+    examsLoaded = true;
+  }catch(e){
+    listBox.innerHTML = `<span style="color:var(--red);">تعذّر تحميل الاختبارات (${esc(e.message||'')}).</span>`;
+    return;
+  }
 
-  // يبني بنية {مستوى -> مادة -> اختبارات} مرتبة، مع تطبيق تصفية المادة/المستوى محليًا (بلا أي استعلام جديد)
-  // هذا هو الفرق الجوهري: التصفية تشتغل على بيانات محمّلة مسبقًا فما تتعطلش أو تعلق حتى مع بطء الشبكة.
-  function groupExamsFor(list, subjFilter, levelFilter){
-    const f = (subjFilter||'').trim();
-    const lv = (levelFilter||'').trim();
-    let filtered = f ? list.filter(ex => textMatches(ex.subject, f) || textMatches(ex.title, f)) : list.slice();
-    if(lv) filtered = filtered.filter(ex => textMatches(ex.level||'', lv));
+  // يعرض لائحة التلاميذ الذين أجابوا على موضوع معيّن، مع نقطهم وأزرار فتح/تنزيل تصحيحهم PDF
+  async function openTopicSubmissions(examEntry){
+    listBox.querySelectorAll('.exam-row').forEach(r=>r.classList.remove('active-topic'));
+    const rowEl = listBox.querySelector(`[data-topic="${examEntry.id}"]`);
+    if(rowEl) rowEl.classList.add('active-topic');
+    subPanel.innerHTML = `<div class="card"><div class="loadbox"><div class="spinner"></div> جارٍ تحميل إجابات التلاميذ...</div></div>`;
+    try{
+      const snap = await db.collection('exams').doc(examEntry.id).collection('submissions').orderBy('score','desc').get();
+      if(snap.empty){
+        subPanel.innerHTML = `<div class="card"><p class="muted">لا توجد إجابات مرسَلة بعد لموضوع "${esc(examEntry.title)}".</p></div>`;
+        return;
+      }
+      subPanel.innerHTML = `
+        <div class="card">
+          <h3 style="margin-top:0;">📋 ${esc(examEntry.title)} — إجابات التلاميذ (${snap.size})</h3>
+          <table>
+            <thead><tr><th>التلميذ</th><th>النقطة</th><th>التصحيح</th></tr></thead>
+            <tbody id="subRows"></tbody>
+          </table>
+        </div>`;
+      const tbody = subPanel.querySelector('#subRows');
+      snap.docs.forEach((d,i)=>{
+        const s = d.data();
+        const cls = i===0?'rank1':i===1?'rank2':i===2?'rank3':'';
+        const tr = el(`<tr>
+          <td>${esc(s.studentName)}</td>
+          <td class="${cls}" dir="ltr">${s.score}/${s.totalPoints}</td>
+          <td>
+            <button class="btn btn-ghost" data-act="open" style="padding:6px 10px;font-size:13px;">👁️ فتح</button>
+            <button class="btn btn-gold" data-act="dl" style="padding:6px 10px;font-size:13px;">⬇️ تنزيل</button>
+          </td>
+        </tr>`);
+        tbody.appendChild(tr);
+        bindCorrectionButtons(tr, examEntry.examData, s);
+      });
+    }catch(e){
+      subPanel.innerHTML = `<div class="card"><span style="color:var(--red);">تعذّر تحميل الإجابات (${esc(e.message||'')}).</span></div>`;
+    }
+  }
+
+  function renderGrouped(filterText, levelValue){
+    if(!examsLoaded){
+      listBox.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
+      return;
+    }
+    const f = (filterText||'').trim().toLowerCase();
+    const lv = levelValue||'';
+    let filtered = f ? allExams.filter(ex =>
+      ex.subject.toLowerCase().includes(f) || ex.title.toLowerCase().includes(f)
+    ) : allExams;
+    if(lv){ const lvf=lv.trim().toLowerCase(); filtered = filtered.filter(ex=>(ex.level||'').toLowerCase().includes(lvf)); }
+
+    subPanel.innerHTML = '';
+    if(filtered.length===0){ listBox.innerHTML = '<p class="muted">لا توجد نتائج مطابقة.</p>'; return; }
+
     const levelGroups = {};
     filtered.forEach(ex=>{
       const lvKey = ex.level || 'بلا مستوى';
@@ -1289,11 +1188,8 @@ async function renderTeacherDashboard(){
       if(ib===-1) return -1;
       return ia-ib;
     });
-    return {filtered, levelGroups, levelNames};
-  }
 
-  function renderExamGroupsHTML(levelGroups, levelNames, extraBadge){
-    return levelNames.map(lvName=>{
+    listBox.innerHTML = levelNames.map(lvName=>{
       const groups = {};
       levelGroups[lvName].forEach(ex=>{
         if(!groups[ex.subject]) groups[ex.subject] = [];
@@ -1317,7 +1213,7 @@ async function renderTeacherDashboard(){
                   <div class="exam-ico">📘</div>
                   <div class="exam-info">
                     <div class="t">${esc(ex.title)}</div>
-                    <div class="s">${ex.questionsCount} سؤال — ${ex.totalPoints} نقطة${extraBadge ? extraBadge(ex) : ''}</div>
+                    <div class="s">${ex.questionsCount} سؤال — ${ex.totalPoints} نقطة</div>
                   </div>
                   <button class="btn btn-ghost" data-manage="${ex.id}" style="padding:8px 12px;font-size:13px;" title="رابط المشاركة والحذف">⚙️</button>
                 </div>`).join('')}
@@ -1326,52 +1222,9 @@ async function renderTeacherDashboard(){
         </div>
       `;
     }).join('');
-  }
-
-  // تبويبة "اختباراتي": تعرض كل الاختبارات بلا استثناء، والضغط على أي واحد يفتح لوحة إدارته
-  function renderMineList(subjVal, levelVal){
-    if(!examsLoaded){ listBoxMine.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>'; return; }
-    const {filtered, levelGroups, levelNames} = groupExamsFor(allExams, subjVal, levelVal);
-    if(allExams.length===0){ listBoxMine.innerHTML = '<p class="muted">لا توجد اختبارات بعد. اضغط على "+ اختبار جديد" للبدء.</p>'; return; }
-    if(filtered.length===0){
-      listBoxMine.innerHTML = `<p class="muted">لا توجد اختبارات مطابقة لبحثك (من أصل ${allExams.length} اختبار محمّل). <a href="#" id="clearSearchMine" style="color:var(--gold-deep);font-weight:700;">امسح البحث</a> لرؤية الجميع.</p>`;
-      const cl = document.getElementById('clearSearchMine');
-      if(cl) cl.onclick = (e)=>{ e.preventDefault(); subjectBoxMine.value=''; levelBoxMine.value=''; renderMineList('',''); };
-      return;
-    }
-    listBoxMine.innerHTML = renderExamGroupsHTML(levelGroups, levelNames, ex => ex.submissionsCount ? ` — ✅ ${ex.submissionsCount} إجابة` : ' — لا إجابات بعد');
-    listBoxMine.querySelectorAll('[data-topic]').forEach(rowEl=>{
-      rowEl.onclick = (e)=>{
-        if(e.target.closest('[data-manage]')) return;
-        openExamPanel(rowEl.dataset.topic);
-      };
-    });
-    listBoxMine.querySelectorAll('[data-manage]').forEach(b=>{
-      b.onclick = (e)=>{ e.stopPropagation(); openExamPanel(b.dataset.manage); };
-    });
-  }
-
-  // تبويبة "نتائج تلاميذي": تعرض حصريًا الاختبارات التي لها إجابة واحدة على الأقل
-  function renderArchiveList(subjVal, levelVal){
-    if(!examsLoaded){ listBox.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>'; return; }
-    // نبقي أيضًا الاختبارات اللي تعذّر التحقق من إجاباتها (submissionsLoadFailed) ظاهرة هنا
-    // بدل ما تختفي بصمت — قد يكون عندها إجابات فعلية ما قدرناش نأكدوها بسبب خطأ شبكة عابر.
-    const withSubs = allExams.filter(ex=>ex.submissionsCount>0 || ex.submissionsLoadFailed);
-    const {filtered, levelGroups, levelNames} = groupExamsFor(withSubs, subjVal, levelVal);
-    if(withSubs.length===0){ subPanel.innerHTML=''; listBox.innerHTML = '<p class="muted">لا توجد اختبارات أنجزها تلاميذ بعد.</p>'; return; }
-    if(filtered.length===0){
-      subPanel.innerHTML='';
-      listBox.innerHTML = `<p class="muted">لا توجد نتائج مطابقة لبحثك (من أصل ${withSubs.length} اختبار منجز). <a href="#" id="clearSearchArch" style="color:var(--gold-deep);font-weight:700;">امسح البحث</a> لرؤية الجميع.</p>`;
-      const cl = document.getElementById('clearSearchArch');
-      if(cl) cl.onclick = (e)=>{ e.preventDefault(); subjectBoxArch.value=''; levelBoxArch.value=''; renderArchiveList('',''); };
-      return;
-    }
-    listBox.innerHTML = renderExamGroupsHTML(levelGroups, levelNames, ex => ex.submissionsLoadFailed ? ' — ⚠️ تعذر التحقق من الإجابات، اضغط لإعادة المحاولة' : ` — 👥 ${ex.submissionsCount} تلميذ`);
     listBox.querySelectorAll('[data-topic]').forEach(rowEl=>{
       rowEl.onclick = (e)=>{
         if(e.target.closest('[data-manage]')) return;
-        listBox.querySelectorAll('.exam-row').forEach(r=>r.classList.remove('active-topic'));
-        rowEl.classList.add('active-topic');
         const ex = allExams.find(x=>x.id===rowEl.dataset.topic);
         if(ex) openTopicSubmissions(ex);
       };
@@ -1381,116 +1234,7 @@ async function renderTeacherDashboard(){
     });
   }
 
-  // يعرض لائحة التلاميذ الذين أجابوا على موضوع معيّن، مع نقطهم وأزرار فتح/تنزيل تصحيحهم PDF
-  // الإجابات محمّلة مسبقًا مع باقي البيانات (انظر loadAllExams) فالعرض هنا فوري بلا أي استعلام إضافي.
-  function openTopicSubmissions(examEntry){
-    if(examEntry.submissionsLoadFailed && (!examEntry.submissions || examEntry.submissions.length===0)){
-      subPanel.innerHTML = `<div class="card">
-        <p style="color:var(--red);">تعذّر التحقق من إجابات "${esc(examEntry.title)}" (خطأ شبكة أو صلاحيات). هذا لا يعني بالضرورة عدم وجود إجابات.</p>
-        <button class="btn btn-ghost" id="retrySubs" style="padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button>
-      </div>`;
-      document.getElementById('retrySubs').onclick = async ()=>{
-        subPanel.innerHTML = `<div class="card"><div class="loadbox"><div class="spinner"></div> جارٍ تحميل إجابات التلاميذ...</div></div>`;
-        try{
-          const subsSnap = await withTimeout(db.collection('exams').doc(examEntry.id).collection('submissions').orderBy('score','desc').get(), 15000);
-          examEntry.submissions = subsSnap.docs.map(d=>d.data());
-          examEntry.submissionsCount = examEntry.submissions.length;
-          examEntry.submissionsLoadFailed = false;
-          renderArchiveList(subjectBoxArch.value, levelBoxArch.value);
-          openTopicSubmissions(examEntry);
-        }catch(e){
-          subPanel.innerHTML = `<div class="card"><span style="color:var(--red);">فشلت المحاولة مجددًا (${esc(e.message||'')}).</span> <button class="btn btn-ghost" id="retrySubs2" style="padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button></div>`;
-          const b2 = document.getElementById('retrySubs2');
-          if(b2) b2.onclick = ()=> openTopicSubmissions(examEntry);
-        }
-      };
-      return;
-    }
-    if(!examEntry.submissions || examEntry.submissions.length===0){
-      subPanel.innerHTML = `<div class="card"><p class="muted">لا توجد إجابات مرسَلة بعد لموضوع "${esc(examEntry.title)}".</p></div>`;
-      return;
-    }
-    subPanel.innerHTML = `
-      <div class="card">
-        <h3 style="margin-top:0;">📋 ${esc(examEntry.title)} — إجابات التلاميذ (${examEntry.submissions.length})</h3>
-        <table>
-          <thead><tr><th>التلميذ(ة)</th><th>النقطة</th><th>التصحيح</th></tr></thead>
-          <tbody id="subRows"></tbody>
-        </table>
-      </div>`;
-    const tbody = subPanel.querySelector('#subRows');
-    examEntry.submissions.forEach((s,i)=>{
-      const cls = i===0?'rank1':i===1?'rank2':i===2?'rank3':'';
-      const tr = el(`<tr>
-        <td>${esc(s.studentName)}</td>
-        <td class="${cls}" dir="ltr">${s.score}/${s.totalPoints}</td>
-        <td>
-          <button class="btn btn-ghost" data-act="open" style="padding:6px 10px;font-size:13px;">👁️ فتح</button>
-          <button class="btn btn-gold" data-act="dl" style="padding:6px 10px;font-size:13px;">⬇️ تنزيل</button>
-        </td>
-      </tr>`);
-      tbody.appendChild(tr);
-      bindCorrectionButtons(tr, examEntry.examData, s);
-    });
-  }
-
-  const subjectBoxMine = document.getElementById('subjectSearchExams');
-  const levelBoxMine = document.getElementById('levelSearchExams');
-  attachSuggestions(levelBoxMine, ALL_LEVELS, (val)=> renderMineList(subjectBoxMine.value, val));
-  attachSuggestions(subjectBoxMine, STANDARD_SUBJECTS, (val)=> renderMineList(val, levelBoxMine.value));
-
-  const subjectBoxArch = document.getElementById('subjectSearch');
-  const levelBoxArch = document.getElementById('levelSearch');
-  attachSuggestions(levelBoxArch, ALL_LEVELS, (val)=> renderArchiveList(subjectBoxArch.value, val));
-  attachSuggestions(subjectBoxArch, STANDARD_SUBJECTS, (val)=> renderArchiveList(val, levelBoxArch.value));
-
-  // تحميل كل الاختبارات وإجاباتها دفعة واحدة، بمهلة زمنية على كل استعلام حتى لا يبقى العرض
-  // عالقًا فحالة "جارٍ التحميل..." إلى الأبد بسبب بطء أو انقطاع الشبكة. خطأ في اختبار واحد
-  // ما كيوقفش تحميل الباقي (try/catch لكل اختبار على حدة).
-  async function loadAllExams(){
-    examsLoaded = false;
-    listBoxMine.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
-    listBox.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
-    let hadPartialError = false;
-    try{
-      // مهم: دابا كنجيبو اختبارات هذا الأستاذ(ة) مباشرة عبر teacherId (استعلام واحد)، بدل ما
-      // نعتمدو على لائحة IDs مخزَّنة محليًا فالجهاز (myExams_v1) — هاذ الطريقة القديمة كانت
-      // كتفقد الاختبارات إلا بدّل الأستاذ(ة) الجهاز أو المتصفح. دابا نفس الكود = نفس الاختبارات
-      // من أي جهاز.
-      const examsSnap = await withTimeout(db.collection('exams').where('teacherId','==',myTeacherId).get(), 20000);
-      const results = await withTimeout(Promise.all(examsSnap.docs.map(async doc=>{
-        const id = doc.id;
-        const data = doc.data();
-        let submissions = [];
-        let submissionsLoadFailed = false;
-        try{
-          const subsSnap = await withTimeout(db.collection('exams').doc(id).collection('submissions').orderBy('score','desc').get(), 15000);
-          submissions = subsSnap.docs.map(d=>d.data());
-        }catch(e){
-          console.error('submissions load error', id, e);
-          submissionsLoadFailed = true;
-          hadPartialError = true;
-        }
-        return { id, title: data.title||id, level: data.level||'', subject: data.subject||'بلا مادة', questionsCount: data.questions?.length||0, totalPoints: data.totalPoints||0, examData: data, submissions, submissionsCount: submissions.length, submissionsLoadFailed };
-      })), 30000);
-      allExams = results.filter(Boolean);
-      examsLoaded = true;
-      if(hadPartialError) toast('تعذّر تحميل بعض الإجابات، تحقق من الاتصال بالإنترنت.');
-    }catch(e){
-      console.error(e);
-      const retryHtml = `<div><span style="color:var(--red);">تعذّر تحميل الاختبارات (${esc(e.message||'')}).</span> <button class="btn btn-ghost" id="retryLoadExams" style="margin-right:8px;padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button></div>`;
-      listBoxMine.innerHTML = retryHtml;
-      listBox.innerHTML = '';
-      subPanel.innerHTML = '';
-      const retryBtn = document.getElementById('retryLoadExams');
-      if(retryBtn) retryBtn.onclick = loadAllExams;
-      return;
-    }
-    renderMineList(subjectBoxMine.value, levelBoxMine.value);
-    renderArchiveList(subjectBoxArch.value, levelBoxArch.value);
-  }
-
-  loadAllExams();
+  renderGrouped('', '');
 }
 
 // يحذف اختبارًا مع كل إجاباته المرسلة (لا يمكن التراجع عن هذا الإجراء)
@@ -1508,7 +1252,7 @@ function newDraft(){
   return { level:'', subject:'', title:'', examFiles:null, keyFiles:null, questions:null, step:1, extra:'' };
 }
 
-// أداة قص دقيقة: كتخلي الأستاذ(ة) يختار صفحة من ملف الاختبار الأصلي، ويسحب مربعًا حول الرسم/الشكل
+// أداة قص دقيقة: كتخلي الأستاذ يختار صفحة من ملف الاختبار الأصلي، ويسحب مربعًا حول الرسم/الشكل
 // المطلوب، ويحفظه كصورة حقيقية (بلا أي إعادة رسم من الذكاء الاصطناعي) — دقة 100% للرسوم العلمية.
 function openImageCropTool(d, onDone, opts={}){
   const host = document.getElementById('cropModalHost');
@@ -1521,7 +1265,7 @@ function openImageCropTool(d, onDone, opts={}){
     host.innerHTML = `
       <div class="modal-bg">
         <div class="modal" style="max-width:520px;">
-          <h3 style="margin-top:0;">🖼️ اختاري الصفحة التي فيها الرسم/الشكل</h3>
+          <h3 style="margin-top:0;">🖼️ اختر الصفحة التي فيها الرسم/الشكل</h3>
           <div class="row" style="flex-wrap:wrap;gap:10px;">
             ${d.examPageImages.map((src,i)=>`
               <img data-page="${i}" src="${src}" style="width:90px;height:120px;object-fit:cover;border:2px solid var(--line);border-radius:8px;cursor:pointer;">
@@ -1540,8 +1284,8 @@ function openImageCropTool(d, onDone, opts={}){
     host.innerHTML = `
       <div class="modal-bg">
         <div class="modal" style="max-width:560px;">
-          <h3 style="margin-top:0;">اسحبي لتحديد مربع حول الرسم/الشكل</h3>
-          <p class="muted" style="font-size:12.5px;">حددي المنطقة بدقة — ستُنسخ كما هي بلا أي تعديل.</p>
+          <h3 style="margin-top:0;">اسحب لتحديد مربع حول الرسم/الشكل</h3>
+          <p class="muted" style="font-size:12.5px;">حدد المنطقة بدقة — ستُنسخ كما هي بلا أي تعديل.</p>
           <div id="cropWrap" style="position:relative;max-width:100%;border:1px solid var(--line);border-radius:8px;overflow:hidden;touch-action:none;">
             <img id="cropImg" src="${d.examPageImages[state2.pageIdx]}" style="width:100%;display:block;user-select:none;-webkit-user-drag:none;">
             <div id="cropRectBox" style="position:absolute;border:2px dashed var(--gold-deep);background:rgba(201,152,47,.18);display:none;"></div>
@@ -1651,21 +1395,21 @@ function renderTeacherCreate(){
         ${levelSelectHTML('levelIn', d.level)}
       </div>
       <div class="field"><label>المادة</label>
-        ${subjectPickerHTML('subjectIn', d.subject)}
+        <input type="text" id="subjectIn" value="${esc(d.subject)}" placeholder="مثلاً: اللغة العربية، الرياضيات، الفرنسية...">
       </div>
       <div class="field"><label>عنوان الاختبار</label>
         <input type="text" id="titleIn" value="${esc(d.title)}" placeholder="مثلاً: اختبار الفصل الثالث"></div>
       <div class="field"><label>📄 ملف الاختبار (PDF)</label>
-        <p class="muted" style="margin-top:-4px;margin-bottom:8px;font-size:12px;">يُستعمل فقط لاستخراج الأسئلة بالذكاء الاصطناعي، ولن يُخزَّن — التلميذ(ة) سيحصل على نسخة PDF مطابقة تُولَّد تلقائيًا.</p>
+        <p class="muted" style="margin-top:-4px;margin-bottom:8px;font-size:12px;">يُستعمل فقط لاستخراج الأسئلة بالذكاء الاصطناعي، ولن يُخزَّن — التلميذ سيحصل على نسخة PDF مطابقة تُولَّد تلقائيًا.</p>
         <input type="file" id="examPdf" accept="application/pdf"></div>
       <div class="field"><label>✅ ملف الحل النموذجي (PDF) (مع توزيع النقاط)</label>
         <input type="file" id="keyPdf" accept="application/pdf"></div>
       <button class="btn btn-primary btn-block" id="toStep2">استخراج الأسئلة بالذكاء الاصطناعي ⟵</button>
     `;
-    wireSubjectPicker('subjectIn');
+    attachSuggestions(document.getElementById('subjectIn'), STANDARD_SUBJECTS);
     document.getElementById('toStep2').onclick = async ()=>{
       d.level = document.getElementById('levelIn').value;
-      d.subject = getSubjectPickerValue('subjectIn');
+      d.subject = document.getElementById('subjectIn').value.trim();
       d.title = document.getElementById('titleIn').value.trim();
       const examFile = document.getElementById('examPdf').files[0];
       const keyFile = document.getElementById('keyPdf').files[0];
@@ -1677,7 +1421,7 @@ function renderTeacherCreate(){
       try{
         const examImgs = await pdfFileToImageBlocks(examFile);
         const keyImgs = await pdfFileToImageBlocks(keyFile);
-        // نحتفظو بصور صفحات ملف الاختبار الأصلي (كيفما هي) باش يقدر الأستاذ(ة) يقص منها رسومًا/أشكالًا
+        // نحتفظو بصور صفحات ملف الاختبار الأصلي (كيفما هي) باش يقدر الأستاذ يقص منها رسومًا/أشكالًا
         // بدقة 100% (بلا أي إعادة رسم من الذكاء الاصطناعي، اللي كيبقى معرّض للأخطاء فالرسوم العلمية).
         d.examPageImages = examImgs.map(b=>`data:${b.source.media_type};base64,${b.source.data}`);
         const content = [
@@ -1689,12 +1433,12 @@ function renderTeacherCreate(){
         ];
         const system = `أنت مساعد يستخرج بيانات الاختبارات المدرسية من الصور، ويجب أن يحافظ على نفس ترتيب الظهور الأصلي في ملف الاختبار (وضعية/سند ثم أسئلتها، ثم الوضعية التالية وأسئلتها، وهكذا) بالضبط كما هو مطبوع. أخرج JSON بهذا الشكل بالضبط:
 {"subject":"...","title":"...","totalPoints":20,"passages":[{"type":"text","title":"النص/الوثيقة","text":"النص كاملاً كما هو مكتوب","beforeQuestion":1}],"questions":[{"number":1,"text":"نص السؤال (أو النص التمهيدي المشترك إن كان للسؤال أجزاء)","points":2,"modelAnswer":"الحل النموذجي الكامل لهذا السؤال بكل أجزائه","expectedLines":3,"parts":[],"answerTable":null}]}
-- passage من نوع رسم/شكل/مخطط (مهم جدًا): إذا لاحظتِ رسمًا علميًا أو مخططًا أو شكلًا بيانيًا أو صورة (مثل رسم توضيحي فالعلوم الطبيعية أو دارة كهربائية فالفيزياء أو خريطة أو رسم بياني) لا يمكن نسخه كنص، **لا تحاولي وصفه أو إعادة رسمه أو تخمين محتواه إطلاقًا** لأن هذا معرّض لأخطاء خطيرة فمادة علمية. بدل ذلك حددي فقط مكانه فالصفحة (التطبيق سيقص الصورة الحقيقية تلقائيًا من نفس البكسلات الأصلية، بلا أي إعادة رسم): {"type":"image","title":"عنوان قصير للرسم إن وجد","pageIndex":0,"box":{"x":0.1,"y":0.2,"width":0.35,"height":0.25},"beforeQuestion":N}. حيث pageIndex هو رقم صفحة ملف الاختبار (0 = الصفحة الأولى) التي يظهر فيها الرسم، وbox إحداثيات نسبية من 0 إلى 1 (نسبة لأبعاد الصفحة الكاملة: x,y زاوية أعلى-يسار، width/height الأبعاد) تحيط بالرسم بأكمله بدقة. اجعلي المربع يشمل الرسم كاملاً مع هامش بسيط حوله (أفضل من اقتطاع جزء منه). إذا لم تكوني متأكدة إطلاقًا من موقعه استعملي {"type":"note","title":"يوجد رسم/شكل هنا يجب إضافته يدويًا","beforeQuestion":N} كحل احتياطي فقط.
+- passage من نوع رسم/شكل/مخطط (مهم جدًا): إذا لاحظتِ رسمًا علميًا أو مخططًا أو شكلًا بيانيًا أو صورة (مثل رسم توضيحي فالعلوم الطبيعية أو دارة كهربائية فالفيزياء أو خريطة أو رسم بياني) لا يمكن نسخه كنص، **لا تحاول وصفه أو إعادة رسمه أو تخمين محتواه إطلاقًا** لأن هذا معرّض لأخطاء خطيرة فمادة علمية. بدل ذلك حدد فقط مكانه فالصفحة (التطبيق سيقص الصورة الحقيقية تلقائيًا من نفس البكسلات الأصلية، بلا أي إعادة رسم): {"type":"image","title":"عنوان قصير للرسم إن وجد","pageIndex":0,"box":{"x":0.1,"y":0.2,"width":0.35,"height":0.25},"beforeQuestion":N}. حيث pageIndex هو رقم صفحة ملف الاختبار (0 = الصفحة الأولى) التي يظهر فيها الرسم، وbox إحداثيات نسبية من 0 إلى 1 (نسبة لأبعاد الصفحة الكاملة: x,y زاوية أعلى-يسار، width/height الأبعاد) تحيط بالرسم بأكمله بدقة. اجعل المربع يشمل الرسم كاملاً مع هامش بسيط حوله (أفضل من اقتطاع جزء منه). إذا لم تكون متأكدة إطلاقًا من موقعه استعمل {"type":"note","title":"يوجد رسم/شكل هنا يجب إضافته يدويًا","beforeQuestion":N} كحل احتياطي فقط.
 - passages: أي نص قرائي أو وثيقة أو مقطع (نص أدبي، وثيقة تاريخية، خريطة موصوفة نصيًا، وضعية إدماجية بسياقها وسندها...) يظهر في ملف الاختبار ويجب على التلميذ الاعتماد عليه للإجابة عن سؤال أو أكثر. انسخه حرفيًا وكاملاً كما هو مكتوب، بلا تلخيص ولا تغيير. إن لم يوجد أي نص من هذا النوع أرجع مصفوفة فارغة [].
-- passage من نوع جدول مرجعي (مثل جدول "Aide-toi du tableau" أو أي جدول معلومات معمّر مسبقًا يعتمد عليه التلميذ): استعملي {"type":"table","title":"...","headers":["عمود1","عمود2",...],"rows":[{"cells":["قيمة1","قيمة2",...]},...],"beforeQuestion":N} بدل الحقل text. لاحظي أن كل صف هو كائن فيه "cells" (وليس مصفوفة مباشرة). انسخي كل خلية حرفيًا كما هي مكتوبة فالجدول الأصلي، بنفس عدد الأعمدة والصفوف بالضبط.
-- beforeQuestion (إلزامي لكل passage): رقم أول سؤال يظهر مباشرة بعد هذا النص/الوثيقة/الجدول في الترتيب الأصلي للاختبار (أي أن هذا العنصر يجب أن يُطبع قبل السؤال رقم كذا). هذا الحقل أساسي جدًا للحفاظ على ترتيب الاختبار الأصلي: كل وضعية/سند لها أسئلتها الخاصة التي تليها مباشرة قبل الوضعية التالية — لا تجمّعي كل النصوص في مكان واحد ولا كل الأسئلة في مكان آخر.
-- answerTable (اختياري، للأسئلة فقط): إن كان السؤال عبارة عن جدول (مثل "أكمل الجدول التالي")، ضعي {"headers":["عمود1","عمود2",...],"rows":[{"cells":["محتوى الخلية أو فارغة"]}]}. **مهم جدًا:** انسخي محتوى كل خلية كما هو بالضبط من الجدول الأصلي — إن كانت الخلية معمّرة (مثلاً عمود "السؤال" فيه سؤال فرعي مكتوب) انسخي نصها حرفيًا، وإن كانت فارغة يخليها التلميذ يملؤها اتركيها سلسلة نصية فارغة "". لا تفترضي أن كل الخلايا فارغة — كثير من الجداول فيها عمود معمّر (كالسؤال) وعمود فارغ (مكان الجواب) بنفس الصف. عدد الخلايا فكل صف يطابق عدد الأعمدة بالضبط. إن كان السؤال عاديًا بلا جدول اتركي answerTable = null، ولا تستعملي parts وanswerTable معًا فنفس السؤال.
-- parts (اختياري): إن كان السؤال يتكون من جزءين أو أكثر منفصلين، كل جزء يحتاج فراغ إجابة مستقل (مثلاً تمارين اللغات: a) ... b) ...، أو "أعد ترتيب..." + "أكمل بـ..."، أو أي سؤال فيه بندين واضحين كل بند له مكان كتابة خاص به في الورقة الأصلية)، ضع كل جزء ككائن في المصفوفة: {"text":"نص الجزء","expectedLines":2}. اترك "text" الرئيسي للسؤال كنص تمهيدي مشترك فقط (أو فارغًا إن ما كانش هناك تمهيد)، ولا تكرري نص الأجزاء داخل الحقل text. مهم: احذفي أي ترقيم أو حرف أصلي فبداية كل جزء (مثل "a-" أو "a)" أو "1)" أو "-") لأن التطبيق سيرقّم الأجزاء تلقائيًا بحروف (a, b, c...) — اكتبي فقط نص الجزء بلا الترقيم الأصلي. إن كان السؤال بجزء واحد، اترك parts مصفوفة فارغة [] واستعملي text وexpectedLines العاديين.
+- passage من نوع جدول مرجعي (مثل جدول "Aide-toi du tableau" أو أي جدول معلومات معمّر مسبقًا يعتمد عليه التلميذ): استعمل {"type":"table","title":"...","headers":["عمود1","عمود2",...],"rows":[{"cells":["قيمة1","قيمة2",...]},...],"beforeQuestion":N} بدل الحقل text. لاحظ أن كل صف هو كائن فيه "cells" (وليس مصفوفة مباشرة). انسخ كل خلية حرفيًا كما هي مكتوبة فالجدول الأصلي، بنفس عدد الأعمدة والصفوف بالضبط.
+- beforeQuestion (إلزامي لكل passage): رقم أول سؤال يظهر مباشرة بعد هذا النص/الوثيقة/الجدول في الترتيب الأصلي للاختبار (أي أن هذا العنصر يجب أن يُطبع قبل السؤال رقم كذا). هذا الحقل أساسي جدًا للحفاظ على ترتيب الاختبار الأصلي: كل وضعية/سند لها أسئلتها الخاصة التي تليها مباشرة قبل الوضعية التالية — لا تجمّع كل النصوص في مكان واحد ولا كل الأسئلة في مكان آخر.
+- answerTable (اختياري، للأسئلة فقط): إن كان السؤال عبارة عن جدول (مثل "أكمل الجدول التالي")، ضع {"headers":["عمود1","عمود2",...],"rows":[{"cells":["محتوى الخلية أو فارغة"]}]}. **مهم جدًا:** انسخ محتوى كل خلية كما هو بالضبط من الجدول الأصلي — إن كانت الخلية معمّرة (مثلاً عمود "السؤال" فيه سؤال فرعي مكتوب) انسخ نصها حرفيًا، وإن كانت فارغة يخليها التلميذ يملؤها اتركيها سلسلة نصية فارغة "". لا تفترض أن كل الخلايا فارغة — كثير من الجداول فيها عمود معمّر (كالسؤال) وعمود فارغ (مكان الجواب) بنفس الصف. عدد الخلايا فكل صف يطابق عدد الأعمدة بالضبط. إن كان السؤال عاديًا بلا جدول اترك answerTable = null، ولا تستعمل parts وanswerTable معًا فنفس السؤال.
+- parts (اختياري): إن كان السؤال يتكون من جزءين أو أكثر منفصلين، كل جزء يحتاج فراغ إجابة مستقل (مثلاً تمارين اللغات: a) ... b) ...، أو "أعد ترتيب..." + "أكمل بـ..."، أو أي سؤال فيه بندين واضحين كل بند له مكان كتابة خاص به في الورقة الأصلية)، ضع كل جزء ككائن في المصفوفة: {"text":"نص الجزء","expectedLines":2}. اترك "text" الرئيسي للسؤال كنص تمهيدي مشترك فقط (أو فارغًا إن ما كانش هناك تمهيد)، ولا تكرر نص الأجزاء داخل الحقل text. مهم: احذف أي ترقيم أو حرف أصلي فبداية كل جزء (مثل "a-" أو "a)" أو "1)" أو "-") لأن التطبيق سيرقّم الأجزاء تلقائيًا بحروف (a, b, c...) — اكتب فقط نص الجزء بلا الترقيم الأصلي. إن كان السؤال بجزء واحد، اترك parts مصفوفة فارغة [] واستعمل text وexpectedLines العاديين.
 - text: نص السؤال بلا ترقيمه الأصلي فبدايته (مثل "1." أو "1)" أو "-")، لأن التطبيق كيعرض "السؤال N" فسطر منفصل تلقائيًا فوق النص.
 - expectedLines: عدد الأسطر المناسبة لكتابة الجواب يدويًا (بين 1 و8) حسب طول الحل النموذجي.
 - اربط كل سؤال بنقطته وحله من ملف الحل النموذجي بالترتيب ورقم السؤال.
@@ -1752,7 +1496,7 @@ function renderTeacherCreate(){
     if(!d.passages) d.passages = [];
     box.innerHTML = `
       <h3>النصوص والوثائق المرفقة</h3>
-      <p class="muted">النصوص أو الوثائق التي يجب على التلميذ(ة) الاعتماد عليها للإجابة — ستظهر في ورقة الاختبار قبل الأسئلة.</p>
+      <p class="muted">النصوص أو الوثائق التي يجب على التلميذ الاعتماد عليها للإجابة — ستظهر في ورقة الاختبار قبل الأسئلة.</p>
       <div id="plist"></div>
       <div class="row">
         <button class="btn btn-ghost" id="addP">+ إضافة نص/وثيقة يدويًا</button>
@@ -1791,7 +1535,7 @@ function renderTeacherCreate(){
           </div>
           <p class="muted" style="color:var(--red);">${esc(p.title||'يوجد رسم/شكل هنا فالاختبار الأصلي يجب إضافته يدويًا كصورة.')}</p>
           <div class="row">
-            ${d.examPageImages && d.examPageImages.length ? `<button class="btn btn-gold" data-resolvenote="${i}">🖼️ أضيفي الصورة الآن</button>`:''}
+            ${d.examPageImages && d.examPageImages.length ? `<button class="btn btn-gold" data-resolvenote="${i}">🖼️ أضف الصورة الآن</button>`:''}
           </div>
           <div class="field" style="margin-top:10px;"><label>يظهر قبل السؤال رقم</label><input type="number" min="1" class="p-before" value="${p.beforeQuestion??1}"></div>
         </div>`;
@@ -1934,7 +1678,7 @@ function renderTeacherCreate(){
           <div class="field"><label>الحل النموذجي</label><textarea class="q-answer"${ltr} rows="2">${esc(q.modelAnswer||'')}</textarea></div>
           ${hasTable? `
           <div class="field">
-            <label>جدول السؤال (اتركي أي خلية فارغة لتكون مكان كتابة إجابة التلميذ، أو عمّريها بنص ثابت كسؤال فرعي)</label>
+            <label>جدول السؤال (اترك أي خلية فارغة لتكون مكان كتابة إجابة التلميذ، أو عمّريها بنص ثابت كسؤال فرعي)</label>
             <div style="background:var(--panel-solid);border:1px solid var(--line);border-radius:12px;padding:10px;overflow-x:auto;">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <span class="pill">أعمدة وصفوف الجدول</span>
@@ -2100,7 +1844,7 @@ function renderTeacherCreate(){
     box.innerHTML = `
       <h3>${editing? 'جاهزة لحفظ التعديلات':'جاهز للنشر'}</h3>
       <p class="muted"><b>${esc(d.title)}</b> — ${esc(d.level)} — ${esc(d.subject)} — ${d.questions.length} سؤال — من ${total} نقطة</p>
-      ${pendingNotes>0? `<p style="color:var(--red);font-size:13.5px;">⚠️ عندك ${pendingNotes} رسم/شكل مفقود لم تتم إضافته بعد كصورة (راجعي قسم النصوص/الوثائق). هذا الرسم لن يظهر فالاختبار المنشور إلا إذا أضفتيه.</p>`:''}
+      ${pendingNotes>0? `<p style="color:var(--red);font-size:13.5px;">⚠️ عندك ${pendingNotes} رسم/شكل مفقود لم تتم إضافته بعد كصورة (راجع قسم النصوص/الوثائق). هذا الرسم لن يظهر فالاختبار المنشور إلا إذا أضفتيه.</p>`:''}
       <button class="btn btn-primary btn-block" id="publish">${editing? '💾 حفظ التعديلات':'🖋️ نشر الاختبار'}</button>
       <button class="btn btn-ghost btn-block" id="backEdit" style="margin-top:10px;">⟵ رجوع للتعديل</button>
       <div id="pubMsg" style="margin-top:12px;"></div>
@@ -2121,7 +1865,7 @@ function renderTeacherCreate(){
             passages,
             questions: d.questions.map((q,i)=>({...q, number:i+1})),
             totalPoints: total,
-            examPdfUrl: d.examPdfUrl || null // ملف PDF الأصلي غير مخزّن (يحتاج Storage)؛ الأستاذ(ة)/التلميذ(ة) يستعملو نسخة PDF المولّدة تلقائيًا
+            examPdfUrl: d.examPdfUrl || null // ملف PDF الأصلي غير مخزّن (يحتاج Storage)؛ الأستاذ/التلميذ يستعملو نسخة PDF المولّدة تلقائيًا
           };
         }
         async function saveExamData(passages){
@@ -2164,6 +1908,11 @@ function renderTeacherCreate(){
           }
         }
         if(!saved) throw lastErr;
+        if(!editing){
+          const mine = JSON.parse(localStorage.getItem('myExams_v1')||'[]');
+          mine.unshift(examId);
+          localStorage.setItem('myExams_v1', JSON.stringify(mine));
+        }
         toast(editing? 'تم حفظ التعديلات ✅':'تم النشر ✅');
         go('teacherExamView', {examId});
       }catch(e){
@@ -2182,7 +1931,7 @@ function isSizeErrorSafe(msg){ return /exceeds the maximum allowed size|maximum.
 
 /* ============================= TEACHER: EXAM VIEW + LIVE LEADERBOARD ============================= */
 let unsubLeaderboard = null;
-let unsubExamListener = null; // ربط مباشر لصفحة الاختبار عند التلميذ(ة)، باش أي تعديل ديال الأستاذ(ة) يبان تلقائيًا
+let unsubExamListener = null; // ربط مباشر لصفحة الاختبار عند التلميذ، باش أي تعديل ديال الأستاذ يبان تلقائيًا
 async function renderTeacherExamView(){
   if(unsubLeaderboard){ unsubLeaderboard(); unsubLeaderboard=null; }
   const examId = state.examId;
@@ -2213,12 +1962,12 @@ async function renderTeacherExamView(){
     </div>
     <div class="card">
       <h3>📄 نسخة الأسئلة (PDF)</h3>
-      <p class="muted">نسخة PDF جاهزة للطباعة من الأسئلة والنصوص المرفقة، كما تظهر للتلميذ(ة).</p>
+      <p class="muted">نسخة PDF جاهزة للطباعة من الأسئلة والنصوص المرفقة، كما تظهر للتلميذ.</p>
       <div class="row">
         <button class="btn btn-ghost" id="openQPdf" style="flex:1;">👁️ فتح</button>
         <button class="btn btn-gold" id="dlQPdf" style="flex:1;">⬇️ تحميل</button>
       </div>
-      <p class="muted" style="margin-top:12px;font-size:12.5px;">📌 راجعي نسخة الأسئلة قبل بعث الرابط للتلاميذ. لقيتي خطأ؟ رجعي عدّلي مباشرة:</p>
+      <p class="muted" style="margin-top:12px;font-size:12.5px;">📌 راجع نسخة الأسئلة قبل بعث الرابط للتلاميذ. وجدت خطأً؟ عد وعدّل مباشرة:</p>
       <button class="btn btn-ghost btn-block" id="editExamBtn">✏️ رجوع لتعديل الأسئلة</button>
     </div>
     <div class="card">
@@ -2249,6 +1998,8 @@ async function renderTeacherExamView(){
     btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> جارٍ الحذف...`;
     try{
       await deleteExamCompletely(examId);
+      const stored = JSON.parse(localStorage.getItem('myExams_v1')||'[]').filter(x=>x!==examId);
+      localStorage.setItem('myExams_v1', JSON.stringify(stored));
       toast('تم حذف الاختبار ✅');
       go('teacherDashboard');
     }catch(e){
@@ -2274,8 +2025,8 @@ async function renderTeacherExamView(){
         const cls = i===1?'rank1':i===2?'rank2':i===3?'rank3':'';
         rows += `<tr data-sub="${d.id}" style="cursor:pointer;"><td class="${cls}">#${i}</td><td>${esc(s.studentName)}</td><td class="${cls}" dir="ltr">${s.score}/${s.totalPoints}</td><td>${s.submittedAt&&s.submittedAt.toDate?s.submittedAt.toDate().toLocaleString('ar'):'—'}</td></tr>`;
       });
-      board.innerHTML = `<table><thead><tr><th>الرتبة</th><th>التلميذ(ة)</th><th>النقطة</th><th>الوقت</th></tr></thead><tbody>${rows}</tbody></table>
-      <p class="muted" style="margin-top:8px;font-size:12px;">اضغط على أي تلميذ(ة) لعرض تفاصيل إجابته وتنزيل تصحيحه PDF</p>`;
+      board.innerHTML = `<table><thead><tr><th>الرتبة</th><th>التلميذ</th><th>النقطة</th><th>الوقت</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="muted" style="margin-top:8px;font-size:12px;">اضغط على أي تلميذ لعرض تفاصيل إجابته وتنزيل تصحيحه PDF</p>`;
       board.querySelectorAll('[data-sub]').forEach(tr=>{
         tr.onclick = async ()=>{
           const subDoc = await db.collection('exams').doc(examId).collection('submissions').doc(tr.dataset.sub).get();
@@ -2323,14 +2074,14 @@ async function renderStudentExam(){
   const examId = state.examId;
   app.innerHTML = `${Header('الاختبار')}<div class="card"><div class="loadbox"><div class="spinner"></div> جارٍ التحميل...</div></div>`;
 
-  let ex; // ربط مباشر (onSnapshot): هاذ المتغيّر كيتحدّث تلقائيًا مع كل تعديل ينشره الأستاذ(ة)، بلا حاجة التلميذ(ة) يعاود تحميل الصفحة
+  let ex; // ربط مباشر (onSnapshot): هاذ المتغيّر كيتحدّث تلقائيًا مع كل تعديل ينشره الأستاذ، بلا حاجة التلميذ يعاود تحميل الصفحة
   let firstLoad = true;
 
   await new Promise((resolve)=>{
     unsubExamListener = db.collection('exams').doc(examId).onSnapshot(snap=>{
       if(!snap.exists){
         if(unsubExamListener){ unsubExamListener(); unsubExamListener=null; }
-        app.innerHTML = `${Header()}<div class="card">رمز الاختبار هذا غير موجود. يرجى التأكد منه مع الأستاذ(ة).</div>
+        app.innerHTML = `${Header()}<div class="card">رمز الاختبار هذا غير موجود. يرجى التأكد منه مع الأستاذ.</div>
         <a class="backlink" id="b" href="#">⟵ رجوع</a>`;
         document.getElementById('b').onclick=(e)=>{e.preventDefault(); go('landing');};
         resolve();
@@ -2343,9 +2094,9 @@ async function renderStudentExam(){
         buildPage();
         resolve();
       } else {
-        // الأستاذ(ة) بدّل شي حاجة فالاختبار بعد ما التلميذ(ة) فتح الصفحة — نبينو تنبيه بلا ما نمسحو النموذج
-        // (الاسم والصور لي بدا يرفعها التلميذ(ة) تبقى كيفما هي، وبيانات الاختبار ديال الطباعة/التصحيح كتكون محدّثة تلقائيًا)
-        toast('🔄 حدّث الأستاذ(ة) هذا الاختبار — البيانات تحدّثت تلقائيًا');
+        // الأستاذ بدّل شي حاجة فالاختبار بعد ما التلميذ فتح الصفحة — نبينو تنبيه بلا ما نمسحو النموذج
+        // (الاسم والصور لي بدا يرفعها التلميذ تبقى كيفما هي، وبيانات الاختبار ديال الطباعة/التصحيح كتكون محدّثة تلقائيًا)
+        toast('🔄 حدّث الأستاذ هذا الاختبار — البيانات تحدّثت تلقائيًا');
       }
     }, err=>{
       console.error(err);
@@ -2371,9 +2122,9 @@ async function renderStudentExam(){
       <span class="pill">${ex.questions.length} سؤال</span>
       <span class="pill">${ex.totalPoints} نقطة</span>
       <p class="muted" style="margin-top:14px;">
-        1️⃣ اطبعي الاختبار، أو حمّلي نسخة PDF للكتابة عليها بقلم إلكتروني 📄<br>
-        2️⃣ أجيبي كتابيًا (على الورقة أو داخل ملف الـ PDF)<br>
-        3️⃣ صوّري إجاباتك (أو أرسلي ملف الـ PDF المكتوب) للتصحيح الفوري
+        1️⃣ اطبع الاختبار، أو حمّل نسخة PDF للكتابة عليها بقلم إلكتروني 📄<br>
+        2️⃣ أجب كتابيًا (على الورقة أو داخل ملف الـ PDF)<br>
+        3️⃣ صوّر إجاباتك (أو أرسل ملف الـ PDF المكتوب) للتصحيح الفوري
       </p>
       <button class="btn btn-gold btn-block" id="printBtn">🖨️ طباعة الاختبار</button>
       <div class="row" style="margin-top:10px;">
@@ -2381,7 +2132,7 @@ async function renderStudentExam(){
         <button class="btn btn-ghost" id="dlWritablePdf" style="flex:1;">⬇️ تحميل PDF للكتابة بالقلم</button>
       </div>
       <p class="muted" style="margin-top:8px;font-size:12px;">
-        💡 عندك قلم إلكتروني (Stylus)؟ حمّلي نسخة الـ PDF، افتحيها فتطبيق الكتابة عندك (مثل GoodNotes أو Xodo أو Samsung Notes)، أجيبي مباشرة فوقها، ثم احفظي الملف وارفعيه أدناه بدل الصور.
+        💡 عندك قلم إلكتروني (Stylus)؟ حمّل نسخة الـ PDF، افتحيها فتطبيق الكتابة عندك (مثل GoodNotes أو Xodo أو Samsung Notes)، أجب مباشرة فوقها، ثم احفظ الملف وارفعيه أدناه بدل الصور.
       </p>
       ${ex.examPdfUrl ? `
       <div class="row" style="margin-top:10px;">
@@ -2389,7 +2140,7 @@ async function renderStudentExam(){
         <button class="btn btn-ghost" id="dlOrigPdf" style="flex:1;">⬇️ تحميل الملف الأصلي</button>
       </div>` : ''}
       <p class="muted" style="margin-top:12px;font-size:12.5px;">
-        📓 تعذّر عليك الطباعة؟ يمكنك الإجابة على ورقة عادية من كراستك: اكتبي رقم كل سؤال قبل إجابته مباشرةً (مثلاً: "1-" ثم الإجابة)، بلا حاجة لنسخ نص الأسئلة، ثم صوّري الورقة وأرسليها كما هو موضح أدناه.
+        📓 تعذّر عليك الطباعة؟ يمكنك الإجابة على ورقة عادية من كراستك: اكتب رقم كل سؤال قبل إجابته مباشرةً (مثلاً: "1-" ثم الإجابة)، بلا حاجة لنسخ نص الأسئلة، ثم صوّر الورقة وأرسليها كما هو موضح أدناه.
       </p>
     </div>
     <div class="card" id="submitSection">
@@ -2451,7 +2202,7 @@ async function renderStudentExam(){
       const dupCheck = await db.collection('exams').doc(examId).collection('submissions')
         .where('studentName','==', name).limit(1).get();
       if(!dupCheck.empty){
-        toast('يوجد تلميذ بنفس الاسم سلّم مسبقًا. يرجى إضافة اللقب أو التواصل مع الأستاذ(ة).');
+        toast('يوجد تلميذ بنفس الاسم سلّم مسبقًا. يرجى إضافة اللقب أو التواصل مع الأستاذ.');
         btn.disabled=false; btn.innerHTML='✅ تسليم للتصحيح';
         return;
       }
@@ -2496,7 +2247,7 @@ async function renderStudentExam(){
       const content = [
         {type:'text', text:`هذا محتوى الاختبار (نصوص/جداول/رسوم وأسئلته، بنفس ترتيب ظهورها فالاختبار الأصلي):`},
         ...examContentBlocks,
-        {type:'text', text:`وهذه صور ورقة إجابة التلميذ(ة) "${name}" عن هذا الاختبار:\n\nملاحظة: قد تكون الإجابة مكتوبة إما على نسخة مطبوعة من الاختبار، أو على ورقة عادية (كراسة) يسبق كل إجابة فيها رقم السؤال فقط بلا نص السؤال — في الحالتين اربطي كل إجابة برقم السؤال المكتوب يدويًا. صحح كل سؤال بمقارنة إجابة التلميذ بالحل النموذجي (وبالنصوص/الوثائق/الرسوم أعلاه إن كان السؤال يستند إليها)، وأعطه نقطة من نقطة السؤال (يمكن نقطة جزئية)، واكتب في studentAnswerSummary نصًا رقميًا واضحًا يلخّص أو ينسخ ما كتبه التلميذ فعليًا (تفريغ رقمي للإجابة اليدوية).`},
+        {type:'text', text:`وهذه صور ورقة إجابة التلميذ "${name}" عن هذا الاختبار:\n\nملاحظة: قد تكون الإجابة مكتوبة إما على نسخة مطبوعة من الاختبار، أو على ورقة عادية (كراسة) يسبق كل إجابة فيها رقم السؤال فقط بلا نص السؤال — في الحالتين اربط كل إجابة برقم السؤال المكتوب يدويًا. صحح كل سؤال بمقارنة إجابة التلميذ بالحل النموذجي (وبالنصوص/الوثائق/الرسوم أعلاه إن كان السؤال يستند إليها)، وأعطه نقطة من نقطة السؤال (يمكن نقطة جزئية)، واكتب في studentAnswerSummary نصًا رقميًا واضحًا يلخّص أو ينسخ ما كتبه التلميذ فعليًا (تفريغ رقمي للإجابة اليدوية).`},
         ...imgBlocks,
         {type:'text', text:'أخرج JSON فقط بهذا الشكل بلا أي مقدمة:\n{"perQuestion":[{"number":1,"studentAnswerSummary":"تفريغ رقمي دقيق لما كتبه التلميذ","awarded":1.5,"max":2,"feedback":"ملاحظة قصيرة توضح الخطأ أو الصواب"}],"totalScore":0,"overallFeedback":"تعليق عام قصير ومشجع"}'}
       ];
@@ -2591,7 +2342,7 @@ function buildPrintSheet(ex){
   const bodyHtml = orderedExamItems(ex).map(item=>{
     if(item.type==='passage'){
       const p = item.data;
-      if(p.type==='note') return ''; // تنبيه داخلي للأستاذ(ة) فقط، لا يُطبع أبدًا
+      if(p.type==='note') return ''; // تنبيه داخلي للأستاذ فقط، لا يُطبع أبدًا
       if(p.type==='image' && p.imageData){
         return `
     <div class="sheet-passage">
@@ -2692,7 +2443,7 @@ async function generateExamPdfBlob(ex){
   return pdf.output('blob');
 }
 
-// يجهّز زوج أزرار "فتح PDF" و"تنزيل PDF" لنسخة الأسئلة (للأستاذ(ة))
+// يجهّز زوج أزرار "فتح PDF" و"تنزيل PDF" لنسخة الأسئلة (للأستاذ)
 function wireExamPdfButtons(openBtnId, downloadBtnId, ex){
   let cachedBlob = null;
   async function ensureBlob(){
@@ -2837,8 +2588,6 @@ function render(){
     case 'teacherStudentResult': renderTeacherStudentResult(); break;
     case 'studentExam': renderStudentExam(); break;
     case 'studentResult': renderStudentResult(); break;
-    case 'adminGate': renderAdminGate(); break;
-    case 'adminPanel': renderAdminPanel(); break;
     default: renderLanding();
   }
 }
@@ -2894,108 +2643,14 @@ function wireInstallButton(id){
   btn.onclick = triggerInstallPrompt;
 }
 
-/* ============================= لوحة المشرف (مراقبة الأساتذة المسجَّلين) ============================= */
-// الوصول: افتحي الرابط وزيدي فالآخر ?admin=1 (مثلاً: https://your-app.com/?admin=1)
-// هاذ الرابط ماشي مكتوب فأي مكان فالواجهة — خاصك تحتفظي بيه أنتِ بوحدك.
-function renderAdminGate(){
-  app.innerHTML = `
-    ${Header('لوحة المشرف')}
-    <div class="card">
-      <p class="muted">هاذ الصفحة خاصة بيك أنتِ فقط لمراقبة الأساتذة المسجَّلين فالتطبيق.</p>
-      <div class="field"><label>كلمة السر</label>
-        <input type="password" id="adminPass" placeholder="••••••••"></div>
-      <button class="btn btn-primary btn-block" id="adminGo">دخول</button>
-      <div id="adminErr" style="color:var(--red);margin-top:10px;font-size:13px;"></div>
-    </div>
-    <a class="backlink" id="back" href="#">⟵ رجوع</a>
-  `;
-  document.getElementById('back').onclick=(e)=>{e.preventDefault(); go('landing');};
-  document.getElementById('adminGo').onclick = ()=>{
-    const v = document.getElementById('adminPass').value;
-    if(v === ADMIN_PASSWORD){
-      localStorage.setItem(ADMIN_KEY, '1');
-      go('adminPanel');
-    } else {
-      document.getElementById('adminErr').textContent = 'كلمة السر غير صحيحة.';
-    }
-  };
-}
-
-async function renderAdminPanel(){
-  if(localStorage.getItem(ADMIN_KEY) !== '1'){ go('adminGate'); return; }
-  if(!initFirebase()){ go('setup'); return; }
-  app.innerHTML = `
-    ${Header('لوحة المشرف')}
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-        <h3 style="margin:0;">👥 الأساتذة المسجَّلون</h3>
-        <div style="display:flex;gap:8px;">
-          <button class="btn btn-ghost" id="refreshAdmin" style="padding:8px 12px;">🔄</button>
-          <a href="#" id="adminLogout" class="backlink" style="align-self:center;">تسجيل الخروج</a>
-        </div>
-      </div>
-      <div id="adminBody" class="muted" style="margin-top:14px;">جارٍ التحميل...</div>
-    </div>
-    <a class="backlink" id="back" href="#">⟵ رجوع</a>
-  `;
-  document.getElementById('back').onclick=(e)=>{e.preventDefault(); go('landing');};
-  document.getElementById('adminLogout').onclick = (e)=>{ e.preventDefault(); localStorage.removeItem(ADMIN_KEY); go('adminGate'); };
-  document.getElementById('refreshAdmin').onclick = loadAdminData;
-
-  const body = document.getElementById('adminBody');
-  async function loadAdminData(){
-    body.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل لائحة الأساتذة...</div>';
-    try{
-      const teachersSnap = await withTimeout(db.collection('teachers').orderBy('createdAt','desc').get(), 15000);
-      const teachers = teachersSnap.docs.map(d=>({ code:d.id, createdAt:d.data().createdAt }));
-      if(teachers.length===0){
-        body.innerHTML = '<p class="muted">لا يوجد أي أستاذ(ة) مسجَّل بعد.</p>';
-        return;
-      }
-      body.innerHTML = `<p class="pill" style="margin-bottom:14px;">📊 العدد الإجمالي: ${teachers.length} أستاذ(ة)</p>
-        <table>
-          <thead><tr><th>الكود</th><th>تاريخ التسجيل</th><th>عدد الاختبارات</th></tr></thead>
-          <tbody id="adminRows"></tbody>
-        </table>`;
-      const tbody = document.getElementById('adminRows');
-      // نعرضو صف لكل أستاذ فورًا بالتاريخ، ونجيبو عدد اختباراته بشكل منفصل (خطأ فواحد ما
-      // كيوقفش عرض الباقي)
-      teachers.forEach(t=>{
-        const dateStr = t.createdAt?.toDate ? t.createdAt.toDate().toLocaleDateString('ar-DZ') : '—';
-        const tr = el(`<tr>
-          <td dir="ltr" style="text-align:right;">${esc(t.code)}</td>
-          <td>${esc(dateStr)}</td>
-          <td id="cnt-${esc(t.code)}">...</td>
-        </tr>`);
-        tbody.appendChild(tr);
-      });
-      await Promise.all(teachers.map(async t=>{
-        const cell = document.getElementById('cnt-'+t.code);
-        if(!cell) return;
-        try{
-          const examsSnap = await withTimeout(db.collection('exams').where('teacherId','==',t.code).get(), 15000);
-          cell.textContent = examsSnap.size;
-        }catch(e){ cell.textContent = '—'; }
-      }));
-    }catch(e){
-      body.innerHTML = `<div><span style="color:var(--red);">تعذّر تحميل لائحة الأساتذة (${esc(e.message||'')}).</span> <button class="btn btn-ghost" id="retryAdmin" style="margin-right:8px;padding:6px 12px;font-size:13px;">🔄 إعادة المحاولة</button></div>`;
-      const rb = document.getElementById('retryAdmin');
-      if(rb) rb.onclick = loadAdminData;
-    }
-  }
-  loadAdminData();
-}
-
 /* ============================= BOOT ============================= */
 (function boot(){
   tryImportCfgFromUrl();
-  if(params.get('admin')==='1'){
-    go('adminGate');
-  } else if(state.examId){
+  if(state.examId){
     if(initFirebase()){ go('studentExam', {examId: state.examId}); }
     else {
       app.innerHTML = `${Header()}<div class="card">
-        <p class="muted">هذا الرابط غير مكتمل من الناحية التقنية. يرجى التأكد من فتح الرابط الكامل الذي أرسله الأستاذ(ة)، وليس رمزًا مقتطعًا منه.</p>
+        <p class="muted">هذا الرابط غير مكتمل من الناحية التقنية. يرجى التأكد من فتح الرابط الكامل الذي أرسله الأستاذ، وليس رمزًا مقتطعًا منه.</p>
         <button class="btn btn-primary" id="tryManual">العودة إلى قائمة الاختبارات</button>
       </div>`;
       document.getElementById('tryManual').onclick = ()=> go('landing');
