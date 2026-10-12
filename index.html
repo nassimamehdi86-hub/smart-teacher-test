@@ -727,7 +727,11 @@ function normalizeLinesBlock(block){
 function fixLiteralNewlines(text){
   if(!text) return text;
   // الرموز HTML التي يخرجها الذكاء الاصطناعي أحيانًا (M&#39;hamed) تُحوَّل لحروفها قبل أي معالجة
-  const s = String(text).replace(/&#39;|&#x27;|&apos;/g,"'").replace(/&quot;/g,'"').replace(/&amp;/g,'&');
+  // حلقة لأن الترميز قد يكون مزدوجًا (&amp;#39; ← &#39; ← ')
+  let s = String(text);
+  for(let k=0;k<4 && /&(#39|#x27|apos|quot|amp);/i.test(s);k++){
+    s = s.replace(/&#39;|&#x27;|&apos;/gi,"'").replace(/&quot;/gi,'"').replace(/&amp;/gi,'&');
+  }
   // خارج علامات $ : كل \n حرفية = سطر جديد (حتى قبل حرف مثل \nB-)؛ داخل المعادلات نحمي أوامر LaTeX مثل \neq و\nu
   return s.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]*?\$)/g).map((part,i)=> i%2===1
     ? part.replace(/\\n(?![A-Za-z])/g,'\n')
@@ -748,6 +752,51 @@ function normalizeExtractedMath(text){
     if(part.startsWith('$')) return '$' + normalizeLinesBlock(part.slice(1,-1)) + '$';
     return normalizeLinesBlock(part);
   }).join('');
+}
+// حماية برمجية: في سؤال «Complete the table / أكمل الجدول» لا يبقى من الجدول إلا العمود الأول (المعطى للتلميذ)،
+// وتُفرَّغ كل خلايا الإجابة مهما أرجع الذكاء الاصطناعي. الجدول المحلول ينتقل إلى modelAnswer،
+// وإن وُضع الجدول المعبّأ فـ passages يُحوَّل إلى answerTable فارغ ويُحذف من passages.
+function enforceBlankCompleteTable(questions, passages){
+  const re = /complete\s+(the\s+)?(following\s+)?table|fill\s+in\s+the\s+table|أكمل(ي|وا)?\s+(ال)?جدول|ملأ?\s*الجدول|compl[eé]t(ez|er)\s+le\s+tableau/i;
+  const cellsOf = r => Array.isArray(r) ? r : (r && r.cells) || [];
+  const toPipe = (headers, rows) => [headers].concat(rows.map(cellsOf)).map(r=>r.join(' | ')).join('\n');
+  const drop = new Set();
+  (questions||[]).forEach(q=>{
+    if(!re.test(String(q.text||''))) return;
+    let src = null, from = null;
+    if(q.answerTable && q.answerTable.headers && q.answerTable.headers.length){ src = q.answerTable; from = 'q'; }
+    else {
+      const idx = (passages||[]).findIndex(pp=>pp.type==='table' && pp.headers && Number(pp.beforeQuestion)===Number(q.number));
+      if(idx>=0){ src = passages[idx]; from = 'p'; drop.add(idx); }
+    }
+    if(!src) return;
+    const headers = src.headers;
+    const rows = (src.rows||[]).map(cellsOf);
+    if(!rows.length) return;
+    const filled = rows.some(r=>r.slice(1).some(c=>String(c||'').trim()));
+    if(filled && !String(q.modelAnswer||'').trim()) q.modelAnswer = toPipe(headers, rows);
+    q.answerTable = { headers, rows: rows.map(r=>({ cells: headers.map((h,ci)=> ci===0 ? (r[0]??'') : '') })) };
+  });
+  return (passages||[]).filter((_,i)=>!drop.has(i));
+}
+// إصلاح ترتيب عناوين الأقسام: إذا تراكم عنوانان من نفس النوع (Activity 02 ثم Activity 01) قبل نفس السؤال
+// فالأول منهما وُضع غالبًا متأخرًا؛ نرجعه لسؤال سابق ما دام فارغًا من العناوين.
+function fixStackedSections(passages){
+  const secs = passages.filter(p=>p.type==='section');
+  const groups = {};
+  secs.forEach(p=>{ (groups[p.beforeQuestion] = groups[p.beforeQuestion] || []).push(p); });
+  const key = p=>String(p.title||'').trim().split(/\s+/)[0].toLowerCase();
+  Object.keys(groups).map(Number).sort((a,b)=>a-b).forEach(N=>{
+    const g = groups[N];
+    if(g.length<2 || !g.every(p=>key(p)===key(g[0]))) return;
+    const prev = Math.max(0, ...secs.filter(p=>p.beforeQuestion<N).map(p=>Number(p.beforeQuestion)||0));
+    const m = g.length;
+    for(let k=0;k<m-1;k++){
+      const target = N-(m-1-k);
+      if(target>prev) g[k].beforeQuestion = target;
+    }
+  });
+  return passages;
 }
 // يطبّق التطبيع أعلاه بشكل متكرر على كل الحقول النصية لكائن اختبار مستخرج بالكامل
 // (الوثائق/النصوص، الأسئلة، الأجزاء، الجداول)، ويرجّع نفس الكائن بعد التعديل.
@@ -2024,6 +2073,7 @@ function renderTeacherCreate(){
       <div class="field"><label>✅ ملف الحل النموذجي (PDF أو صور / تصوير) (مع توزيع النقاط) — اختياري</label>
         <p class="muted" style="margin-top:-4px;margin-bottom:8px;font-size:12px;">إن لم يكن لديك حل نموذجي، اتركه بلا رفع: سيُنشئ التطبيق الأسئلة وأماكن الإجابة فقط بلا حلول جاهزة ولا تصحيح تلقائي بالنقطة.</p>
         <div id="keyPicker"></div></div>
+      <label style="display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px;cursor:pointer;"><input type="checkbox" id="skipFigs"> 🚫 لا تستخرج الوثائق والأشكال (الصور) — أسرع</label>
       <button class="btn btn-primary btn-block" id="toStep2">استخراج الأسئلة بالذكاء الاصطناعي ⟵</button>
     `;
     attachSuggestions(document.getElementById('subjectIn'), STANDARD_SUBJECTS);
@@ -2039,6 +2089,7 @@ function renderTeacherCreate(){
       if(!d.subject || !d.title){ toast('يرجى تعبئة حقلي المادة والعنوان'); return; }
       if(!examFiles.length){ toast('يجب رفع ملف الاختبار أو تصويره'); return; }
       d.examFile = examFiles[0];
+      const skipFigs = !!document.getElementById('skipFigs')?.checked;
       box.innerHTML = `<div class="loadbox"><div class="spinner"></div> جارٍ قراءة الملفات واستخراج الأسئلة، يرجى الانتظار قليلاً... <small id="stageTimer" style="opacity:.7;margin-inline-start:6px;"></small></div>`;
       window.__ccStatus = 'قراءة الملفات';
       const _t0 = Date.now();
@@ -2094,6 +2145,7 @@ function renderTeacherCreate(){
 - **ترقيم التمارين والوضعيات (إلزامي، خطأ شائع نرصده):** انسخي عنوان كل تمرين وكل وضعية بنفس رقمه الأصلي بالضبط كما هو مطبوع (\"تمرين 7\"، \"وضعية 1\"، \"وضعية 4\"...). لا تعيدي ترقيمها أبدًا ولا تحذفي أي واحدة ولا تدمجي وضعيتين فواحدة ولا تنقلي وضعية إلى داخل تمرين آخر. إذا كان الملف فيه قسم \"تمارين\" ثم قسم \"وضعيات\"، فكل وضعية تأخذ عنوان section مستقل برقمها الأصلي (وضعية 1، 2، 3، 4، 5) وتأتي بعد آخر تمرين وبنفس ترتيبها الأصلي. الصفحات ذات العمودين تُقرأ من العمود الأيمن ثم الأيسر، وتأكدي من عدّ كل الوضعيات الموجودة قبل تسليم الـ JSON.
 - **قاعدة منع تقسيم الوضعية (خطأ نرصده):** الوضعية الواحدة = عنوان section واحد فقط، مهما كان عدد أسئلتها. الأسطر الفرعية المبدوءة بشرطة (-) أو نقطة (o) أو ترقيم داخل نفس الوضعية هي **أسئلة تابعة لنفس الوضعية** وليست وضعيات جديدة، فلا تنشئي لها section مستقلاً أبدًا. لا تنشئي section جديدًا إلا حيث يوجد فعلاً عنوان مطبوع من نوع "وضعية N:" أو "تمرين N:" في الملف الأصلي، وعنوانه يحمل رقمه المطبوع بالضبط. مثال: إن كانت "وضعية 4" (الحديقة والأعمدة) تحتوي ثلاثة أسئلة (هل يمكن أن تكون المسافة 5m؟ 7m؟ / ما أقل عدد من الأعمدة؟ / ما عدد الأعمدة اللازم؟) فتُنتج section واحدًا "وضعية 4" قبل أول هذه الأسئلة، ولا يوجد section قبل السؤالين الآخرين. وإن كانت "وضعية 5" (التبليط) تحتوي ثلاثة أسئلة (طول ضلع البلاطة / عدد البلاطات / سعر البلاط) فهي section واحد "وضعية 5" قبل أولها. قبل تسليم الـJSON: عدّي عناوين الوضعيات المطبوعة فالأصل وتأكدي أن عدد عناصر section من نوع وضعية يساويه بالضبط وأن أرقامها مطابقة (مثلاً 1،2،3،4،5 بلا تكرار ولا انقسام).
 - **الرسوم والوثائق الخاصة بكل تمرين/وضعية (إلزامي):** كل رسم أو شكل أو جدول أو وثيقة يجب أن يكون beforeQuestion الخاص به هو رقم أول سؤال من التمرين/الوضعية التي يخصها، وهو رقم موجود فعلاً فمصفوفة questions (لا تضعي أبدًا رقمًا أكبر من آخر سؤال). يجب أن يظهر الرسم بجانب أسئلته وليس مجمّعًا فآخر الاختبار. الرسم ليس تمرينًا ولا وضعية: لا تنشئي له section ولا عنوانًا مثل \"شكل توضيحي للوضعية 4\"، واستعملي لعنوانه (title) \"الشكل\" فقط أو اتركيه فارغًا. ترتيب العناصر فنفس beforeQuestion: عنوان التمرين/الوضعية (section) أولاً ثم رسمها.
+- **موضع عنوان التمرين/النشاط (إلزامي):** beforeQuestion لعنوان section هو رقم أول سؤال يقع تحته مباشرة، وليس رقم سؤال لاحق. مثال: إن كان الترتيب المطبوع «Activity 01» ثم Question 1 ثم «Activity 02» ثم Question 2 ثم «Activity 01» ثم Question 3، فالعناوين: Activity 01 قبل 1، Activity 02 قبل 2، Activity 01 قبل 3 — ولا يجتمع عنوانان قبل نفس السؤال إلا إن كانا مطبوعين فعلاً متتاليين بلا سؤال بينهما.
 - لا تكتب أي نص خارج الـ JSON.`;
         const raw = await callClaude(system, content, {onProgress: n=>{ box.innerHTML = `<div class="loadbox"><div class="spinner"></div> جارٍ استخراج الأسئلة (الجزء ${n+1})، يرجى الانتظار... <small id="stageTimer" style="opacity:.7;margin-inline-start:6px;"></small></div>`; }});
         const parsed = deepNormalizeExam(extractJSON(raw));
@@ -2108,9 +2160,12 @@ function renderTeacherCreate(){
           }
           return p;
         });
+        rawPassages = enforceBlankCompleteTable(d.questions, rawPassages);
+        d.questions = d.questions.map(q=>({ ...q, answerTable: normalizeAnswerTable(q.answerTable) }));
         // نقص تلقائيًا كل رسم/شكل حددو الذكاء الاصطناعي بإحداثياته من صورة الصفحة الأصلية —
         // بلا أي تدخل يدوي، والمحتوى البصري نفسه حقيقي 100% (بكسلات من الملف الأصلي، بلا إعادة رسم).
-        if(d.examPageImages && d.examPageImages.length){
+        if(skipFigs) rawPassages = rawPassages.filter(p=>p.type!=='image' && p.type!=='note');
+        if(!skipFigs && d.examPageImages && d.examPageImages.length){
           box.innerHTML = `<div class="loadbox"><div class="spinner"></div> جارٍ قص الرسوم والأشكال تلقائيًا... <small id="stageTimer" style="opacity:.7;margin-inline-start:6px;"></small></div>`;
           rawPassages = await Promise.all(rawPassages.map(async p=>{
             if(p.type==='image' && p.box && (p.pageIndex=Number(p.pageIndex)||0, d.examPageImages[p.pageIndex]!=null)){
@@ -2126,7 +2181,7 @@ function renderTeacherCreate(){
           }));
         }
         // مرحلة مخصّصة لتحديد كل الأشكال وربط كل منها بتمرينها تلقائيًا
-        if(d.examPageImages && d.examPageImages.length){
+        if(!skipFigs && d.examPageImages && d.examPageImages.length){
           try{
             box.innerHTML = `<div class="loadbox"><div class="spinner"></div> جارٍ تحديد الأشكال والوثائق وربطها بتمارينها... <small id="stageTimer" style="opacity:.7;margin-inline-start:6px;"></small></div>`;
             const found = await detectFiguresAuto(d, examImgs, rawPassages);
@@ -2134,6 +2189,7 @@ function renderTeacherCreate(){
             else toast('لم يتمكن التطبيق من تحديد أشكال تلقائيًا');
           }catch(e){ console.error('figure pass failed', e); toast('تعذّر تحديد الأشكال تلقائيًا: '+(e.message||'')); }
         }
+        rawPassages = fixStackedSections(rawPassages);
         d.passages = rawPassages;
         // تنبيه: إذا تراكمت عدة عناوين تمارين/وضعيات قبل نفس السؤال فهذا غالبًا خطأ في ترتيبها + زمن الاستخراج الإجمالي
         { const _seen = {}; let _dup = false;
