@@ -577,7 +577,8 @@ function isolateLatinMathRuns(text){
   // بلا حدود واضحة داخل التدفق العربي.
   return String(text).split(/(\$\$[\s\S]*?\$\$|\$[^$\n]*?\$)/g).map(part=>{
     if(part.startsWith('$')) return wrap(part);
-    let escaped = esc(part);
+    // لا نستعمل esc() هنا: يحوّل ' إلى &#39; فتقطّع regex أدناه الكيان (M&#39;hamed ← M&#<bdi>39;hamed)
+    let escaped = String(part).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     // مهم: نستعمل [ \t]  بدل \s فحدود التعبير حتى لا "يبلع" النمط سطرًا كاملاً فوق آخر
     // (لو استعملنا \s كان غادي يدمج عدة معادلات منفصلة بأسطر مختلفة فـ<bdi> واحد كبير،
     // وهذا كيصعّب مراقبة/تشخيص أي انعكاس فسطر بعينه). كل سطر كيتلف بشكل مستقل الآن.
@@ -3391,7 +3392,11 @@ function buildPrintSheet(ex){
     const q = item.data;
     const parts = q.parts||[];
     const labelHtml = `<div class="sheet-qlabel">${L.question} ${q.number} (${q.points} ${L.pt})</div>`;
-    const _at = (q.answerTable && q.answerTable.headers) ? q.answerTable : (parts.length ? null : inferAnswerTable(q));
+    let _at = (q.answerTable && q.answerTable.headers) ? q.answerTable : (parts.length ? null : inferAnswerTable(q));
+    // سؤال «Complete the table»: لا يُطبع إلا العمود الأول، وتُفرَّغ باقي الخلايا حتى في الامتحانات المحفوظة سابقًا
+    if(_at && /complete\s+(the\s+)?(following\s+)?table|fill\s+in\s+the\s+table|أكمل(ي|وا)?\s+(ال)?جدول|compl[eé]t(ez|er)\s+le\s+tableau/i.test(String(q.text||''))){
+      _at = { ..._at, rows: (_at.rows||[]).map(r=>{ const c = Array.isArray(r) ? r : (r.cells||[]); return { cells: _at.headers.map((h,ci)=> ci===0 ? (c[0]??'') : '') }; }) };
+    }
     if(_at){
       const rows = _at.rows && _at.rows.length ? _at.rows : Array.from({length:_at.rowsCount||1}).map(()=>({cells:_at.headers.map(()=>'')}));
       const introHtml = q.text ? `<div class="sheet-qtext">${mathSafe(q.text, ex.subject)}</div>` : '';
