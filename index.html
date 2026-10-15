@@ -2423,7 +2423,7 @@ function renderTeacherCreate(){
           <div class="field"><label>${hasParts? 'نص تمهيدي مشترك (اختياري)':'نص السؤال'}</label><textarea class="q-text"${ltr} rows="2">${esc(q.text||'')}</textarea>${isLtrSubject(d.subject)? `<div class="q-text-preview math-preview"></div>` : ''}</div>
           <div class="row">
             <div class="field"><label>النقطة</label><input type="number" step="0.25" class="q-points" value="${q.points??1}"></div>
-            ${(hasParts||hasTable)? '' : `<div class="field"><label>عدد أسطر الإجابة (للطباعة)</label><input type="number" class="q-lines" value="${q.expectedLines??3}"></div>`}
+            ${(hasParts||hasTable)? '' : `<div class="field"><label>عدد أسطر الإجابة (للطباعة)</label><input type="number" class="q-lines" value="${questionLines(q, d.subject)}"></div>`}
           </div>
           <div class="field"><label>الحل النموذجي</label><textarea class="q-answer"${ltr} rows="2">${esc(q.modelAnswer||'')}</textarea>${isLtrSubject(d.subject)? `<div class="q-answer-preview math-preview"></div>` : ''}</div>
           ${hasTable? `
@@ -2460,7 +2460,7 @@ function renderTeacherCreate(){
           <div class="field">
             <label>الجمل (كل جملة في سطر، تُطبع تحت بعضها وأمامها فراغ الجواب — ضعي الكلمة المطلوبة بين [[ ]] لتُسطَّر)</label>
             <textarea class="q-items"${ltr} rows="5" placeholder="جملة في كل سطر">${esc(normalizeItems(q.items).map(it=>it.text).join('\n'))}</textarea>
-            <div class="field" style="margin-top:6px;margin-bottom:0;"><label style="margin-bottom:4px;">أسطر جواب كل جملة (1 = أمام الجملة، 2+ = تحتها)</label><input type="number" min="1" class="q-item-lines" value="${normalizeItems(q.items)[0]?.expectedLines||1}"></div>
+            <div class="field" style="margin-top:6px;margin-bottom:0;"><label style="margin-bottom:4px;">أسطر جواب كل جملة (1 = أمام الجملة، 2+ = تحتها)</label><input type="number" min="1" class="q-item-lines" value="${(itemLinesFromSolution(q)||[])[0] || normalizeItems(q.items)[0]?.expectedLines || 1}"></div>
           </div>
           <div class="field">
             <label>أجزاء السؤال (كل جزء بمكان إجابة مستقل فالطباعة)</label>
@@ -2472,7 +2472,7 @@ function renderTeacherCreate(){
                     <button class="btn btn-danger" data-delpart="${pi}" style="padding:4px 10px;font-size:12px;">حذف الجزء</button>
                   </div>
                   <textarea class="part-text"${ltr} rows="2" placeholder="نص هذا الجزء">${esc(pt.text||'')}</textarea>${isLtrSubject(d.subject)? `<div class="part-text-preview math-preview"></div>` : ''}
-                  <div class="field" style="margin-top:6px;margin-bottom:0;"><label style="margin-bottom:4px;">عدد أسطر إجابة هذا الجزء</label><input type="number" class="part-lines" value="${pt.expectedLines??2}"></div>
+                  <div class="field" style="margin-top:6px;margin-bottom:0;"><label style="margin-bottom:4px;">عدد أسطر إجابة هذا الجزء</label><input type="number" min="1" class="part-lines" value="${partLinesFor(q, pt, d.subject)}"></div>
                 </div>
               `).join('')}
             </div>
@@ -3289,6 +3289,15 @@ function answerLinesFor(modelAnswer, fallback){
   return Math.min(12, Math.max(1, n));
 }
 
+
+// عدد أسطر جزء واحد (نفس القاعدة فالطباعة وفخانة التعديل): اليدوي أولاً، ثم الحل النموذجي، ثم التقدير
+function partLinesFor(q, pt, subject, nParts){
+  if(pt.linesManual && pt.expectedLines) return Math.min(40, Math.max(1, pt.expectedLines));
+  const n = nParts || (q.parts||[]).length || 1;
+  const sol = answerLinesFor(q.modelAnswer, null);
+  if(sol) return Math.max(1, Math.ceil(sol/n));
+  return (pt.expectedLines && pt.expectedLines!==2) ? pt.expectedLines : estimateAnswerLines(pt.text, (q.points||1)/n, subject);
+}
 // عدد أسطر سؤال واحد: إن عدّل الأستاذ العدد يدويًا (linesManual) نحترم قيمته بالضبط،
 // وإلا نبقى على الحساب التلقائي (من الحل النموذجي أو من صيغة السؤال).
 function questionLines(q, subject){
@@ -3415,7 +3424,7 @@ function buildPrintSheet(ex){
       const _partLines = answerLinesFor(q.modelAnswer, null);
       const partsHtml = parts.map((pt,pi)=>`
         <div class="sheet-part"><div class="sheet-qtext" style="margin-top:6px;">${String.fromCharCode(97+pi)}) ${mathSafe(pt.text, ex.subject)}</div>
-        ${Array.from({length: (pt.linesManual && pt.expectedLines) ? Math.min(40, Math.max(1, pt.expectedLines)) : _partLines ? Math.max(1,Math.ceil(_partLines/parts.length)) : ((pt.expectedLines && pt.expectedLines!==2) ? pt.expectedLines : estimateAnswerLines(pt.text, (q.points||1)/parts.length, ex.subject))}).map(()=>'<div class="ruled"></div>').join('')}</div>
+        ${Array.from({length: partLinesFor(q, pt, ex.subject, parts.length)}).map(()=>'<div class="ruled"></div>').join('')}</div>
       `).join('');
       return `<div class="sheet-q">${labelHtml}${introHtml}${partsHtml}</div>`;
     }
