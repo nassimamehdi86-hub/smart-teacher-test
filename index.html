@@ -381,6 +381,25 @@
   /* خيار الطباعة: ورقة A4 عمودية مقسومة لعمودين (كل عمود ~93mm) */
   #printArea.a4c{width:93mm;}
   #printArea.a4c .sheet{padding:10px 6px;}
+  /* ===== تنسيق «ورقة الواجب المنزلي» (للرياضيات فقط) ===== */
+  .sheet.hw{padding:10px 18px;}
+  .sheet.hw .sheet-head{display:block;border:0;padding:0;margin-bottom:10px;}
+  .hw-row{display:flex;justify-content:space-between;align-items:flex-end;gap:10px;font-weight:700;font-size:13px;margin:4px 0;}
+  .hw-row .hw-fill{display:inline-block;border-bottom:1.5px dotted #000;min-width:90px;height:16px;vertical-align:bottom;}
+  .hw-title{text-align:center;font-weight:800;font-size:16px;margin:8px 0 6px;padding:5px 10px;border:2px solid #000;border-radius:6px;}
+  .sheet.hw .sheet-section{margin:12px 0 5px;color:#000;font-size:14.5px;}
+  .sheet.hw .sheet-section > span{background:none;padding:0;text-decoration:underline;text-underline-offset:4px;}
+  .sheet.hw .sheet-section::before{display:none;}
+  .sheet.hw .sheet-qtext{font-size:13.5px;}
+  .sheet.hw .ruled{border-bottom:2px dotted #000;height:26px;}
+  .sheet.hw .sheet-item .it-blank{border-bottom:2px dotted #000;}
+  .sheet.hw .sheet-q{margin-bottom:8px;}
+  /* ورقة الواجب بمقاس A5: رأس أصغر يتسع لعرض الصفحة */
+  #printArea.a5 .sheet.hw .hw-row{font-size:11px;gap:6px;}
+  #printArea.a5 .sheet.hw .hw-row > span{display:flex;align-items:flex-end;gap:3px;flex:1;white-space:nowrap;}
+  #printArea.a5 .sheet.hw .hw-row .hw-fill{min-width:0 !important;flex:1;}
+  #printArea.a5 .sheet.hw .hw-title{font-size:14px;padding:4px 8px;}
+  #printArea.a5 .sheet.hw .sheet-qtext{font-size:12.5px;}
   .pl-toggle select{flex:1;min-width:0;padding:8px 10px;border-radius:10px;border:1.5px solid var(--line);background:var(--panel2);color:inherit;font:inherit;}
   .pl-toggle{display:flex;align-items:center;gap:8px;margin:10px 0 6px;font-size:13px;cursor:pointer;color:var(--dim);}
   .pl-toggle input{width:18px;height:18px;accent-color:var(--gold, #d4a93c);flex:0 0 auto;}
@@ -2766,7 +2785,7 @@ async function renderTeacherExamView(){
     <div class="card">
       <h3>📄 نسخة الأسئلة (PDF)</h3>
       <p class="muted">نسخة PDF جاهزة للطباعة من الأسئلة والنصوص المرفقة، كما تظهر للتلميذ.</p>
-      ${printLayoutToggleHTML()}
+      ${printLayoutToggleHTML(ex)}
       <div class="row">
         <button class="btn btn-ghost" id="openQPdf" style="flex:1;">👁️ فتح</button>
         <button class="btn btn-gold" id="dlQPdf" style="flex:1;">⬇️ تحميل</button>
@@ -2931,7 +2950,7 @@ async function renderStudentExam(){
         2️⃣ أجب كتابيًا (على الورقة أو داخل ملف الـ PDF)<br>
         3️⃣ صوّر إجاباتك (أو أرسل ملف الـ PDF المكتوب) للتصحيح الفوري
       </p>
-      ${printLayoutToggleHTML()}
+      ${printLayoutToggleHTML(ex)}
       <button class="btn btn-gold btn-block" id="printBtn">🖨️ طباعة الاختبار</button>
       <div class="row" style="margin-top:10px;">
         <button class="btn btn-ghost" id="openWritablePdf" style="flex:1;">👁️ معاينة PDF</button>
@@ -3306,7 +3325,14 @@ function questionLines(q, subject){
 }
 
 // خيار الطباعة: 'a4' (عادي) | 'a4cols' (ورقة A4 عمودية مقسومة لعمودين بخط فاصل) | 'a5x2' (صفحتان A5 في ورقة A4 أفقية)
-const PRINT_LAYOUTS = ['a4','a4cols','a5x2'];
+const PRINT_LAYOUTS = ['a4','a4cols','a5x2','hw','hwa5'];
+// تخطيط A5×2 (صفحتان A5 في ورقة A4 أفقية) سواء كان عاديًا أو بتنسيق ورقة الواجب
+function isA5Layout(l){ return l==='a5x2' || l==='hwa5'; }
+// «ورقة الواجب المنزلي»: تنسيق إضافي يظهر للرياضيات فقط (رأس: متوسطة/المستوى/السنة، اللقب/الاسم/القسم/العلامة،
+// عناوين «التمرين الأول:»، وأسطر نقطية للإجابة تحت كل سؤال)
+function isMathSubject(subject){ return /رياضيات|math/i.test(subject||''); }
+function isHW(ex){ return !!ex && /^hw/.test(getPrintLayout()) && isMathSubject(ex.subject); }
+function schoolYearLabel(){ const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1; return m>=8 ? y+'/'+(y+1) : (y-1)+'/'+y; }
 function getPrintLayout(){
   try{ const v = localStorage.getItem('printLayout'); return PRINT_LAYOUTS.includes(v) ? v : 'a4'; }catch(e){ return 'a4'; }
 }
@@ -3315,30 +3341,33 @@ function setPrintLayout(v){
   try{ localStorage.setItem('printLayout', v); }catch(e){}
   document.querySelectorAll('select.pl-select').forEach(c=>{ c.value = v; });
 }
-function printLayoutToggleHTML(){
-  const cur = getPrintLayout();
+function printLayoutToggleHTML(ex){
+  const _math = !!ex && isMathSubject(ex.subject);
+  let cur = getPrintLayout();
+  if(/^hw/.test(cur) && !_math){ cur = cur==='hwa5' ? 'a5x2' : 'a4'; setPrintLayout(cur); }
   const opt = (v,t)=>`<option value="${v}"${cur===v?' selected':''}>${t}</option>`;
   return `<label class="pl-toggle"><span>📄 تخطيط الطباعة</span><select class="pl-select" onchange="setPrintLayout(this.value)">`
     + opt('a4','ورقة A4 عادية')
     + opt('a4cols','A4 عمودية مقسومة لعمودين (توفير الورق)')
     + opt('a5x2','A4 أفقية بصفحتين A5 (توفير الورق)')
+    + (_math ? opt('hw','📝 ورقة الواجب المنزلي (الرياضيات)') + opt('hwa5','📝 ورقة الواجب + A4 أفقية بصفحتين A5') : '')
     + `</select></label>`;
 }
 function applyPrintLayoutToArea(){
   const area = document.getElementById('printArea');
   if(!area) return;
   const l = getPrintLayout();
-  area.classList.toggle('a5', l==='a5x2');
+  area.classList.toggle('a5', isA5Layout(l));
   area.classList.toggle('a4c', l==='a4cols');
 }
 // يضبط حجم الصفحة قبل window.print() حسب الخيار
 function applyPrintPageStyle(){
   const l = getPrintLayout();
-  document.body.classList.toggle('print-a5x2', l==='a5x2');
+  document.body.classList.toggle('print-a5x2', isA5Layout(l));
   document.body.classList.toggle('print-a4cols', l==='a4cols');
   let st = document.getElementById('pageStyleDyn');
   if(!st){ st = document.createElement('style'); st.id='pageStyleDyn'; }
-  st.textContent = l==='a5x2' ? '@page{size:A4 landscape;margin:8mm;}' : l==='a4cols' ? '@page{size:A4;margin:7mm;}' : '@page{size:A4;margin:9mm;}';
+  st.textContent = isA5Layout(l) ? '@page{size:A4 landscape;margin:8mm;}' : l==='a4cols' ? '@page{size:A4;margin:7mm;}' : '@page{size:A4;margin:9mm;}';
   document.head.appendChild(st); // آخر عنصر style ليغلب الإعداد الافتراضي
   applyPrintLayoutToArea();
 }
@@ -3363,12 +3392,14 @@ function buildPrintSheet(ex){
   const area = document.getElementById('printArea');
   const ltr = dirAttr(ex.subject);
   const L = examLabels(ex.subject);
+  const HW = isHW(ex);
   const _items = orderedExamItems(ex);
   const _htmls = _items.map(item=>{
     if(item.type==='passage'){
       const p = item.data;
       if(p.type==='note') return ''; // تنبيه داخلي للأستاذ فقط، لا يُطبع أبدًا
       if(p.type==='section'){
+        if(HW){ const _t = String(p.title||'').trim(); return `<div class="sheet-section"><span>${mathSafe(_t, ex.subject)}${/[:：]\s*$/.test(_t)?'':' :'}</span></div>`; }
         return `<div class="sheet-section"><span>${mathSafe(p.title||'', ex.subject)}</span></div>`;
       }
       if(p.type==='image' && p.imageData){
@@ -3399,7 +3430,7 @@ function buildPrintSheet(ex){
     }
     const q = item.data;
     const parts = q.parts||[];
-    const labelHtml = `<div class="sheet-qlabel">${L.question} ${q.number} (${q.points} ${L.pt})</div>`;
+    const labelHtml = HW ? '' : `<div class="sheet-qlabel">${L.question} ${q.number} (${q.points} ${L.pt})</div>`;
     const _at = (q.answerTable && q.answerTable.headers) ? q.answerTable : (parts.length ? null : inferAnswerTable(q));
     if(_at){
       const rows = _at.rows && _at.rows.length ? _at.rows : Array.from({length:_at.rowsCount||1}).map(()=>({cells:_at.headers.map(()=>'')}));
@@ -3437,7 +3468,7 @@ function buildPrintSheet(ex){
   `;
   });
   // الوثائق/النصوص تُعرض على الجنب (عمود) والأسئلة المرتبطة بها في العمود الآخر لتوفير المساحة
-  const _a5 = getPrintLayout()!=='a4';
+  const _a5 = HW || getPrintLayout()!=='a4';
   const _isSide = (it)=>{
     if(_a5) return false;
     if(it.type!=='passage') return false;
@@ -3502,6 +3533,23 @@ function buildPrintSheet(ex){
       }
     }
     bodyHtml += _htmls[i];
+  }
+  if(HW){
+    const _tt = String(ex.title||'');
+    const _blank = (w)=>`<i class="hw-fill" style="min-width:${w}px;">&nbsp;</i>`;
+    area.innerHTML = `
+    <div class="sheet hw">
+      <div class="sheet-head">
+        <div class="hw-row"><span>متوسطة: ${_blank(170)}</span><span>المستوى: ${_blank(80)}</span><span>السنة الدراسية: ${_blank(90)}</span></div>
+        <div class="hw-title">${esc(_tt)}${/رياضيات|math/i.test(_tt)?'':' في مادة الرياضيات'}</div>
+        <div class="hw-row"><span>اللقب: ${_blank(110)}</span><span>الاسم: ${_blank(110)}</span><span>القسم: ${_blank(40)}</span><span>العلامة: ${_blank(40)} / ${ex.totalPoints}</span></div>
+      </div>
+      ${bodyHtml}
+      ${sheetFooterBrandHTML()}
+    </div>
+  `;
+    renderMathIn(area);
+    return;
   }
   area.innerHTML = `
     <div class="sheet">
@@ -3598,7 +3646,7 @@ function getNoBreakRanges(sheetEl, scale){
 // صفحة كاملة، كنتفادو الأقل ضررًا فقط: ما نقطعوش سؤال أو نص وسطو (ranges).
 async function canvasToA4PdfBlob(canvas, noBreak){
   const { jsPDF } = window.jspdf;
-  const A5X2 = getPrintLayout()==='a5x2', COLS = getPrintLayout()==='a4cols';
+  const A5X2 = isA5Layout(getPrintLayout()), COLS = getPrintLayout()==='a4cols';
   // عادي: صفحات A4 عمودية. A5×2: صفحات A5 (148.5×210) تُركَّب صفحتين في كل ورقة A4 أفقية
   const PAGE_W_MM = A5X2 ? 148.5 : COLS ? 93 : 210, PAGE_H_MM = A5X2 ? 210 : 297; // COLS: كل "صفحة" عمود بعرض 93mm وطول A4، يُركَّب عمودان في كل ورقة A4 عمودية
   const MARGIN_V_MM = A5X2 ? 6 : 8; // هامش علوي/سفلي صغير: الصفحة تتملأ تقريبًا كاملة قبل الانتقال للموالية
