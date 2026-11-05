@@ -1413,6 +1413,7 @@ async function renderLanding(){
         <div class="field" style="flex:1;min-width:140px;">${levelSelectHTML('lvSelLanding','')}</div>
         <div class="field" style="flex:1;min-width:140px;">${subjectSelectHTML('subjSelLanding','')}</div>
       </div>
+      <button class="btn btn-ghost btn-block" id="libOnlyBtn" style="margin:4px 0 10px;">📚 المكتبة فقط: غير مفعّل</button>
       <div id="examsFeed" class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>
     </div>
     <div class="center" style="margin-top:14px;">
@@ -1436,6 +1437,19 @@ async function renderLanding(){
   const subjSel = document.getElementById('subjSelLanding');
   let hidden = getHiddenExams();
   let allDocs = [];
+  let libOnly = false;
+  const libOnlyBtn = document.getElementById('libOnlyBtn');
+  function paintLibOnly(){
+    libOnlyBtn.className = 'btn btn-block ' + (libOnly ? 'btn-gold' : 'btn-ghost');
+    libOnlyBtn.innerHTML = libOnly ? '📚 المكتبة فقط: مفعّل ✅' : '📚 المكتبة فقط: غير مفعّل';
+  }
+  paintLibOnly();
+  libOnlyBtn.onclick = ()=>{
+    libOnly = !libOnly; paintLibOnly();
+    // عند تفعيل المكتبة: نعرض كل اختبارات المكتبة مباشرة، فنفرّغ المستوى والمادة (يمكنه التضييق بعدها إن أراد)
+    if(libOnly){ lvSel.value = ''; subjSel.value = ''; }
+    loadExams();
+  };
   let loadState = 'idle';   // idle | loading | ready | error
   let loadErr = '';
   let reqId = 0;            // يمنع الردود المتأخرة من الكتابة فوق نتيجة أحدث
@@ -1445,7 +1459,7 @@ async function renderLanding(){
   function renderFeed(){
     const lv = lvSel.value, sj = subjSel.value;
     showHiddenLink.style.display = hidden.length>0 ? 'inline' : 'none';
-    if(!lv && !sj){
+    if(!lv && !sj && !libOnly){
       feed.innerHTML = '<p class="muted">اختر المستوى و/أو المادة أعلاه لعرض الاختبارات المتاحة.</p>';
       return;
     }
@@ -1467,7 +1481,7 @@ async function renderLanding(){
     });
     const visibleDocs = matched.filter(d=>!hidden.includes(d.id));
     if(matched.length===0){
-      feed.innerHTML = '<p class="muted">لا توجد اختبارات مطابقة لهذا الاختيار حاليًا.</p>';
+      feed.innerHTML = '<p class="muted">' + (libOnly ? 'لا توجد اختبارات محفوظة في المكتبة لهذا الاختيار حاليًا.' : 'لا توجد اختبارات مطابقة لهذا الاختيار حاليًا.') + '</p>';
       return;
     }
     if(visibleDocs.length===0){
@@ -1501,7 +1515,7 @@ async function renderLanding(){
   // وإلا كانت الاختبارات الأقدم تختفي عشوائيًا كلما نُشرت اختبارات جديدة.
   async function loadExams(){
     const lv = lvSel.value, sj = subjSel.value;
-    if(!lv && !sj){ renderFeed(); return; }
+    if(!lv && !sj && !libOnly){ renderFeed(); return; }
     const my = ++reqId;
     loadState = 'loading'; renderFeed();
     const build = ()=>{
@@ -1509,6 +1523,7 @@ async function renderLanding(){
       if(scopedTeacherId) q = q.where('teacherId','==', scopedTeacherId);
       if(lv) q = q.where('level','==', lv);
       if(sj) q = q.where('subject','==', sj);
+      if(libOnly) q = q.where('inLibrary','==', true);
       return q.limit(300);
     };
     let snap = null, lastErr = null;
