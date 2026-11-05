@@ -1425,6 +1425,10 @@ async function renderLanding(){
   document.getElementById('teacherLink').onclick = (e)=>{ e.preventDefault(); go(localStorage.getItem(TID_KEY) ? 'teacherGate' : 'teacherRegister'); };
   wireInstallButton('installAppBtn');
 
+  if(typeof firebase === 'undefined'){
+    document.getElementById('examsFeed').innerHTML = '<p style="color:var(--red);">تعذّر تحميل مكتبات الاتصال (الإنترنت ضعيف). </p><button class="btn btn-primary" onclick="location.reload()">🔄 إعادة المحاولة</button>';
+    return;
+  }
   if(!initFirebase()){ go('setup'); return; }
   const feed = document.getElementById('examsFeed');
   const showHiddenLink = document.getElementById('showHidden');
@@ -1432,7 +1436,11 @@ async function renderLanding(){
   const subjSel = document.getElementById('subjSelLanding');
   let hidden = getHiddenExams();
   let allDocs = [];
-  let dataLoaded = false;
+  let loadState = 'idle';   // idle | loading | ready | error
+  let loadErr = '';
+  let reqId = 0;            // يمنع الردود المتأخرة من الكتابة فوق نتيجة أحدث
+  const scopedTeacherId = params.get('t') || localStorage.getItem(TID_KEY);
+  const tsOf = d => { const c = d.data().createdAt; return (c && c.toMillis) ? c.toMillis() : 0; };
 
   function renderFeed(){
     const lv = lvSel.value, sj = subjSel.value;
@@ -1441,9 +1449,14 @@ async function renderLanding(){
       feed.innerHTML = '<p class="muted">اختر المستوى و/أو المادة أعلاه لعرض الاختبارات المتاحة.</p>';
       return;
     }
-    // إلا مازال التحميل الأول من قاعدة البيانات ماكملش، نبينو سبينر بدل "لا توجد نتائج" المضلّلة
-    if(!dataLoaded){
+    if(loadState==='loading' || loadState==='idle'){
       feed.innerHTML = '<div class="loadbox"><div class="spinner"></div> جارٍ تحميل الاختبارات...</div>';
+      return;
+    }
+    if(loadState==='error'){
+      feed.innerHTML = `<p style="color:var(--red);">تعذّر جلب قائمة الاختبارات${loadErr?' ('+esc(loadErr)+')':''}.</p>
+        <button class="btn btn-primary" id="retryFeed">🔄 إعادة المحاولة</button>`;
+      document.getElementById('retryFeed').onclick = loadExams;
       return;
     }
     const matched = allDocs.filter(doc=>{
@@ -1484,35 +1497,47 @@ async function renderLanding(){
     });
   }
 
-  lvSel.onchange = renderFeed;
-  subjSel.onchange = renderFeed;
+  // الفلترة تتم في السيرفر (المستوى/المادة) بدل جلب آخر 50 اختبار وفلترتها محليًا،
+  // وإلا كانت الاختبارات الأقدم تختفي عشوائيًا كلما نُشرت اختبارات جديدة.
+  async function loadExams(){
+    const lv = lvSel.value, sj = subjSel.value;
+    if(!lv && !sj){ renderFeed(); return; }
+    const my = ++reqId;
+    loadState = 'loading'; renderFeed();
+    const build = ()=>{
+      let q = db.collection('exams');
+      if(scopedTeacherId) q = q.where('teacherId','==', scopedTeacherId);
+      if(lv) q = q.where('level','==', lv);
+      if(sj) q = q.where('subject','==', sj);
+      return q.limit(300);
+    };
+    let snap = null, lastErr = null;
+    // 3 محاولات من السيرفر مباشرة (إنترنت ضعيف/متقطع) قبل الرجوع للكاش
+    for(let i=0; i<3 && !snap; i++){
+      try{ snap = await build().get({source:'server'}); }
+      catch(e){ lastErr = e; await new Promise(r=>setTimeout(r, 700*(i+1))); }
+    }
+    if(!snap){ try{ snap = await build().get(); }catch(e){ lastErr = e; } }
+    if(my !== reqId) return;
+    // كاش فارغ لا يعني "لا توجد اختبارات" — يعني أننا لم نتصل بالسيرفر
+    if(!snap || (snap.metadata && snap.metadata.fromCache && snap.empty)){
+      loadState = 'error'; loadErr = (lastErr && lastErr.message) || 'لا يوجد اتصال بالسيرفر';
+      renderFeed(); return;
+    }
+    allDocs = snap.docs.slice().sort((a,b)=> tsOf(b) - tsOf(a));
+    loadState = 'ready';
+    renderFeed();
+  }
+
+  lvSel.onchange = loadExams;
+  subjSel.onchange = loadExams;
   showHiddenLink.onclick = (e)=>{
     e.preventDefault();
     hidden = [];
     localStorage.setItem(HIDDEN_KEY, JSON.stringify([]));
     renderFeed();
   };
-
-  try{
-    const scopedTeacherId = params.get('t') || localStorage.getItem(TID_KEY); // إلا كان الرابط فيه ?t=teacherId نبينو اختبارات هاذ الأستاذ فقط، وإلا رجعنا لمعرّف الأستاذ المسجَّل على هذا الجهاز (إن وجد) بدل عرض اختبارات كل الأساتذة مخلوطة
-    let snap;
-    try{
-      // نجبرو القراءة من السيرفر مباشرة (مو الكاش المحلي) باش الاختبار الجديد المنشور يبان مباشرة
-      // بلا تقطّع، حتى لو كان الكاش المحلي قديم أو ناقص.
-      let q = db.collection('exams');
-      q = scopedTeacherId ? q.where('teacherId','==', scopedTeacherId) : q.orderBy('createdAt','desc');
-      snap = await q.limit(50).get({source:'server'});
-    }catch(serverErr){
-      let q2 = db.collection('exams');
-      q2 = scopedTeacherId ? q2.where('teacherId','==', scopedTeacherId) : q2.orderBy('createdAt','desc');
-      snap = await q2.limit(50).get();
-    }
-    allDocs = snap.docs;
-    dataLoaded = true;
-    renderFeed();
-  }catch(e){
-    feed.innerHTML = `<p style="color:var(--red);">تعذّر جلب قائمة الاختبارات (${esc(e.message||'')}).</p>`;
-  }
+  loadExams();
 }
 
 /* ============================= تسجيل الأستاذ (اسم + لقب + هاتف) ============================= */
@@ -1713,6 +1738,7 @@ async function renderTeacherDashboard(){
           <button class="btn btn-primary" id="newExam">+ اختبار جديد</button>
         </div>
         <p class="muted" style="margin-top:12px;">أنشئ اختبارًا جديدًا هنا، أو انتقل لتبويبة "حلول تلاميذي" لمعاينة إجابات التلاميذ ونقطهم وتصحيحهم بصيغة PDF.</p>
+        <div id="libraryList" style="margin-top:8px;"><div class="loadbox"><div class="spinner"></div> جارٍ تحميل مكتبتك...</div></div>
       </div>
 
       <div class="tabpanel" id="tab-archive">
@@ -1775,8 +1801,50 @@ async function renderTeacherDashboard(){
     examsLoaded = true;
   }catch(e){
     listBox.innerHTML = `<span style="color:var(--red);">تعذّر تحميل الاختبارات (${esc(e.message||'')}).</span>`;
+    document.getElementById('libraryList').innerHTML = `<span style="color:var(--red);">تعذّر تحميل مكتبتك (${esc(e.message||'')}).</span>`;
     return;
   }
+
+  // ===== مكتبتي: الاختبارات التي ضغط الأستاذ على "حفظ في مكتبتي" =====
+  const libBox = document.getElementById('libraryList');
+  function renderLibrary(){
+    const saved = allExams.filter(x=>x.examData.inLibrary===true);
+    const unsaved = allExams.filter(x=>x.examData.inLibrary!==true);
+    const row = (ex, isSaved)=>`
+      <div class="exam-row" data-lib-open="${ex.id}" style="cursor:pointer;">
+        <div class="exam-ico">📘</div>
+        <div class="exam-info">
+          <div class="t">${esc(ex.title)}</div>
+          <div class="s">${ex.level?esc(ex.level)+' — ':''}${esc(ex.subject)} — ${ex.questionsCount} سؤال — ${ex.totalPoints} نقطة</div>
+        </div>
+        <button class="btn ${isSaved?'btn-ghost':'btn-gold'}" data-lib-toggle="${ex.id}" style="padding:8px 12px;font-size:13px;">${isSaved?'إزالة':'📚 حفظ'}</button>
+      </div>`;
+    libBox.innerHTML = `
+      <h3 style="margin:14px 0 8px;">📚 مكتبتي <span class="pill">${saved.length}</span></h3>
+      ${saved.length ? saved.map(x=>row(x,true)).join('') : '<p class="muted">مكتبتك فارغة. افتح أي اختبار واضغط على «📚 حفظ في مكتبتي».</p>'}
+      ${unsaved.length ? `
+        <h3 style="margin:22px 0 8px;font-size:15px;">منشورة وغير محفوظة في المكتبة <span class="pill">${unsaved.length}</span></h3>
+        ${unsaved.map(x=>row(x,false)).join('')}` : ''}`;
+    libBox.querySelectorAll('[data-lib-open]').forEach(r=>{
+      r.onclick = (e)=>{ if(e.target.closest('[data-lib-toggle]')) return; openExamPanel(r.dataset.libOpen); };
+    });
+    libBox.querySelectorAll('[data-lib-toggle]').forEach(b=>{
+      b.onclick = async (e)=>{
+        e.stopPropagation();
+        const ex = allExams.find(x=>x.id===b.dataset.libToggle); if(!ex) return;
+        const next = ex.examData.inLibrary !== true;
+        b.disabled = true;
+        try{
+          await db.collection('exams').doc(ex.id).update({inLibrary: next});
+          ex.examData.inLibrary = next;
+          toast(next ? 'تم الحفظ في مكتبتك ✅' : 'تمت الإزالة من مكتبتك');
+        }catch(err){ toast('تعذّر التحديث: ' + (err.message||'')); }
+        renderLibrary();
+      };
+    });
+  }
+  renderLibrary();
+
   if(allExams.length===0){ listBox.innerHTML = 'لا توجد اختبارات بعد. اضغط على "اختبار جديد" للبدء.'; return; }
 
   // يعرض لائحة التلاميذ الذين أجابوا على موضوع معيّن، مع نقطهم وأزرار فتح/تنزيل تصحيحهم PDF
@@ -2735,7 +2803,7 @@ function renderTeacherCreate(){
           mine.unshift(examId);
           localStorage.setItem('myExams_v1', JSON.stringify(mine));
         }
-        toast(editing? 'تم حفظ التعديلات ✅':'تم النشر ✅');
+        toast(editing? 'تم حفظ التعديلات ✅':'تم النشر ✅ — اضغط «حفظ في مكتبتي» لتجده في لوحتك');
         go('teacherExamView', {examId});
       }catch(e){
         const msg = e.message || '';
@@ -2781,6 +2849,7 @@ async function renderTeacherExamView(){
         <input type="text" readonly value="${link}" id="linkField">
         <button class="btn btn-ghost" id="copyLink" style="padding:8px 12px;">نسخ</button>
       </div>
+      <button class="btn btn-block" id="libBtn" style="margin-top:14px;"></button>
     </div>
     <div class="card">
       <h3>📄 نسخة الأسئلة (PDF)</h3>
@@ -2833,6 +2902,22 @@ async function renderTeacherExamView(){
   document.getElementById('copyLink').onclick = ()=>{
     navigator.clipboard.writeText(link);
     toast('تم نسخ الرابط ✅');
+  };
+  const libBtn = document.getElementById('libBtn');
+  let inLib = ex.inLibrary === true;
+  const paintLib = ()=>{
+    libBtn.className = 'btn btn-block ' + (inLib ? 'btn-ghost' : 'btn-gold');
+    libBtn.innerHTML = inLib ? '✅ محفوظ في مكتبتي — اضغط للإزالة' : '📚 حفظ في مكتبتي';
+  };
+  paintLib();
+  libBtn.onclick = async ()=>{
+    libBtn.disabled = true;
+    try{
+      await db.collection('exams').doc(examId).update({inLibrary: !inLib});
+      inLib = !inLib; ex.inLibrary = inLib;
+      toast(inLib ? 'تم الحفظ في مكتبتك ✅' : 'تمت الإزالة من مكتبتك');
+    }catch(err){ toast('تعذّر الحفظ: ' + (err.message||'')); }
+    libBtn.disabled = false; paintLib();
   };
   unsubLeaderboard = db.collection('exams').doc(examId).collection('submissions')
     .orderBy('score','desc')
