@@ -528,8 +528,12 @@ function initFirebase(){
   if(!cfg) return false;
   if(!getClaudeApiUrl()) return false;
   try{
-    if(!firebase.apps.length){ firebase.initializeApp(cfg); }
+    const firstInit = !firebase.apps.length;
+    if(firstInit){ firebase.initializeApp(cfg); }
     db = firebase.firestore();
+    // شبكات الهاتف/الـWiFi الضعيفة كثيرًا ما تحجب اتصال Firestore العادي (WebSocket) فيبقى التحميل معلّقًا بلا نهاية.
+    // الكشف التلقائي يتحوّل إلى Long Polling عند الحاجة. يجب استدعاؤه قبل أي استعلام.
+    if(firstInit){ try{ db.settings({ experimentalForceLongPolling: true, merge: true }); }catch(e){ console.warn('settings', e); } }
     return true;
   }catch(e){ console.error('firebase init failed', e); return false; }
 }
@@ -1340,6 +1344,38 @@ function Header(sub){
 const HIDDEN_KEY = 'examPlatform_hiddenExams_v1';
 function getHiddenExams(){ return JSON.parse(localStorage.getItem(HIDDEN_KEY)||'[]'); }
 
+/* ============================= REST احتياطي: إن فشل اتصال Firestore العادي، نجرّب HTTPS بسيط ============================= */
+function fsDecode(v){
+  if(!v) return null;
+  if('stringValue' in v) return v.stringValue;
+  if('integerValue' in v) return Number(v.integerValue);
+  if('doubleValue' in v) return v.doubleValue;
+  if('booleanValue' in v) return v.booleanValue;
+  if('timestampValue' in v){ const ms = Date.parse(v.timestampValue); return { toMillis:()=>ms, toDate:()=>new Date(ms) }; }
+  if('arrayValue' in v) return (v.arrayValue.values||[]).map(fsDecode);
+  if('mapValue' in v){ const o={}; const f=v.mapValue.fields||{}; for(const k in f) o[k]=fsDecode(f[k]); return o; }
+  return null;
+}
+async function fetchExamsREST(filters, limit){
+  const o = firebase.app().options;
+  const url = `https://firestore.googleapis.com/v1/projects/${o.projectId}/databases/(default)/documents:runQuery?key=${o.apiKey}`;
+  const fl = filters.map(([f,val])=>({ fieldFilter:{ field:{fieldPath:f}, op:'EQUAL', value: (typeof val==='boolean') ? {booleanValue:val} : {stringValue:val} } }));
+  const body = { structuredQuery:{ from:[{collectionId:'exams'}], limit } };
+  if(fl.length) body.structuredQuery.where = { compositeFilter:{ op:'AND', filters: fl } };
+  const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), 12000);
+  try{
+    const res = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body), signal: ctrl.signal });
+    const json = await res.json();
+    if(!res.ok) throw new Error((json && json.error && json.error.message) || ('HTTP '+res.status));
+    const docs = (json||[]).filter(r=>r.document).map(r=>{
+      const obj = {}; const f = r.document.fields||{};
+      for(const k in f) obj[k] = fsDecode(f[k]);
+      return { id: r.document.name.split('/').pop(), data: ()=>obj };
+    });
+    return { docs, empty: docs.length===0, metadata:{fromCache:false} };
+  } finally { clearTimeout(t); }
+}
+
 /* ============================= LANDING ============================= */
 async function renderLanding(){
   app.innerHTML = `
@@ -1468,7 +1504,8 @@ async function renderLanding(){
       return;
     }
     if(loadState==='error'){
-      feed.innerHTML = `<p style="color:var(--red);">تعذّر جلب قائمة الاختبارات${loadErr?' ('+esc(loadErr)+')':''}.</p>
+      feed.innerHTML = `<p style="color:var(--red);">تعذّر الاتصال بالسيرفر. تأكد من الإنترنت أو جرّب شبكة أخرى (WiFi / بيانات الهاتف).</p>
+        <p class="muted" dir="ltr" style="font-size:11px;text-align:left;">${esc(loadErr)}</p>
         <button class="btn btn-primary" id="retryFeed">🔄 إعادة المحاولة</button>`;
       document.getElementById('retryFeed').onclick = loadExams;
       return;
@@ -1527,12 +1564,24 @@ async function renderLanding(){
       return q.limit(300);
     };
     let snap = null, lastErr = null;
+    // مهلة لكل محاولة: بدونها قد يبقى get() معلّقًا بلا نهاية على شبكة سيئة
+    const withTimeout = (pr, ms)=> Promise.race([pr, new Promise((_,rej)=> setTimeout(()=> rej(new Error('انتهت المهلة، الاتصال بطيء')), ms))]);
     // 3 محاولات من السيرفر مباشرة (إنترنت ضعيف/متقطع) قبل الرجوع للكاش
-    for(let i=0; i<3 && !snap; i++){
-      try{ snap = await build().get({source:'server'}); }
+    for(let i=0; i<2 && !snap; i++){
+      try{ snap = await withTimeout(build().get({source:'server'}), 10000); }
       catch(e){ lastErr = e; await new Promise(r=>setTimeout(r, 700*(i+1))); }
     }
-    if(!snap){ try{ snap = await build().get(); }catch(e){ lastErr = e; } }
+    if(!snap || (snap.metadata && snap.metadata.fromCache && snap.empty)){
+      // اتصال Firestore العادي فشل: نجرّب طلب HTTPS مباشر (يعمل غالبًا حتى لو حُجب WebSocket)
+      try{
+        const filters = [];
+        if(scopedTeacherId) filters.push(['teacherId', scopedTeacherId]);
+        if(lv) filters.push(['level', lv]);
+        if(sj) filters.push(['subject', sj]);
+        if(libOnly) filters.push(['inLibrary', true]);
+        snap = await fetchExamsREST(filters, 300);
+      }catch(e){ lastErr = e; snap = null; }
+    }
     if(my !== reqId) return;
     // كاش فارغ لا يعني "لا توجد اختبارات" — يعني أننا لم نتصل بالسيرفر
     if(!snap || (snap.metadata && snap.metadata.fromCache && snap.empty)){
