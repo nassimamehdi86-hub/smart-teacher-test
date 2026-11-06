@@ -647,7 +647,10 @@ function isolateLatinMathRuns(text){
   // بلا حدود واضحة داخل التدفق العربي.
   return String(text).split(/(\$\$[\s\S]*?\$\$|\$[^$\n]*?\$)/g).map(part=>{
     if(part.startsWith('$')) return wrap(part);
-    let escaped = esc(part);
+    // سبب مشكلة l&#39;oasis: esc() يحوّل ' إلى &#39; ثم تقتطع التعابير الآتية أجزاءً من داخل الكيان نفسه (39;...)
+    // وتغلّفها بـ <bdi> فيتكسر الكيان ويظهر حرفيًا. لذلك نحمي كل الكيانات برموز بديلة قبل المعالجة ونستعيدها بعدها.
+    const _ents = [];
+    let escaped = esc(part).replace(/&(?:#\d+|#x[0-9a-f]+|[a-z]+);/gi, m=>{ _ents.push(m); return String.fromCharCode(0xE100 + _ents.length - 1); });
     // مهم: نستعمل [ \t]  بدل \s فحدود التعبير حتى لا "يبلع" النمط سطرًا كاملاً فوق آخر
     // (لو استعملنا \s كان غادي يدمج عدة معادلات منفصلة بأسطر مختلفة فـ<bdi> واحد كبير،
     // وهذا كيصعّب مراقبة/تشخيص أي انعكاس فسطر بعينه). كل سطر كيتلف بشكل مستقل الآن.
@@ -670,7 +673,7 @@ function isolateLatinMathRuns(text){
       if(m.indexOf('<bdi')!==-1) return m; // متلفوفة من قبل، ما نعاودوش
       return wrap(m);
     });
-    return out;
+    return out.replace(/[\uE100-\uF8FF]/g, ch=> _ents[ch.charCodeAt(0) - 0xE100] || '');
   }).join('');
 }
 // يطبّق العزل فقط للمواد اللي فيها رموز رياضية محتملة (نفس معيار isLtrSubject)، ويدير esc() بنفسه دائمًا
