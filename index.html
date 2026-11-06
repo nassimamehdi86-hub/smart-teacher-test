@@ -394,6 +394,9 @@
   .sheet.hw .ruled{border-bottom:2px dotted #000;height:26px;}
   .sheet.hw .sheet-item .it-blank{border-bottom:2px dotted #000;}
   .sheet.hw .sheet-q{margin-bottom:8px;}
+  .sheet.hw .sheet-cols{align-items:stretch;}
+  .sheet.hw .sheet-col + .sheet-col{border-inline-start:1.5px solid #000;}
+  .sheet.hw .sheet-cols .sheet-q{margin-bottom:9px;}
   /* ورقة الواجب بمقاس A5: رأس أصغر يتسع لعرض الصفحة */
   #printArea.a5 .sheet.hw .hw-row{font-size:11px;gap:6px;}
   #printArea.a5 .sheet.hw .hw-row > span{display:flex;align-items:flex-end;gap:3px;flex:1;white-space:nowrap;}
@@ -3474,13 +3477,13 @@ function questionLines(q, subject){
 }
 
 // خيار الطباعة: 'a4' (عادي) | 'a4cols' (ورقة A4 عمودية مقسومة لعمودين بخط فاصل) | 'a5x2' (صفحتان A5 في ورقة A4 أفقية)
-const PRINT_LAYOUTS = ['a4','a4cols','a5x2','hw','hwa5'];
+const PRINT_LAYOUTS = ['a4','a4cols','a5x2','hw','hwa5','hwcols'];
 // تخطيط A5×2 (صفحتان A5 في ورقة A4 أفقية) سواء كان عاديًا أو بتنسيق ورقة الواجب
 function isA5Layout(l){ return l==='a5x2' || l==='hwa5'; }
 // «ورقة الواجب المنزلي»: تنسيق إضافي يظهر للرياضيات فقط (رأس: متوسطة/المستوى/السنة، اللقب/الاسم/القسم/العلامة،
 // عناوين «التمرين الأول:»، وأسطر نقطية للإجابة تحت كل سؤال)
 function isMathSubject(subject){ return /رياضيات|math/i.test(subject||''); }
-function isHW(ex){ return !!ex && /^hw/.test(getPrintLayout()) && isMathSubject(ex.subject); }
+function isHW(ex){ return !!ex && /^hw/.test(getPrintLayout()); }
 function schoolYearLabel(){ const d=new Date(), y=d.getFullYear(), m=d.getMonth()+1; return m>=8 ? y+'/'+(y+1) : (y-1)+'/'+y; }
 function getPrintLayout(){
   try{ const v = localStorage.getItem('printLayout'); return PRINT_LAYOUTS.includes(v) ? v : 'a4'; }catch(e){ return 'a4'; }
@@ -3493,13 +3496,12 @@ function setPrintLayout(v){
 function printLayoutToggleHTML(ex){
   const _math = !!ex && isMathSubject(ex.subject);
   let cur = getPrintLayout();
-  if(/^hw/.test(cur) && !_math){ cur = cur==='hwa5' ? 'a5x2' : 'a4'; setPrintLayout(cur); }
   const opt = (v,t)=>`<option value="${v}"${cur===v?' selected':''}>${t}</option>`;
   return `<label class="pl-toggle"><span>📄 تخطيط الطباعة</span><select class="pl-select" onchange="setPrintLayout(this.value)">`
     + opt('a4','ورقة A4 عادية')
     + opt('a4cols','A4 عمودية مقسومة لعمودين (توفير الورق)')
     + opt('a5x2','A4 أفقية بصفحتين A5 (توفير الورق)')
-    + (_math ? opt('hw','📝 ورقة الواجب المنزلي (الرياضيات)') + opt('hwa5','📝 ورقة الواجب + A4 أفقية بصفحتين A5') : '')
+    + opt('hw','📝 ورقة الواجب المنزلي') + opt('hwa5','📝 ورقة الواجب + A4 أفقية بصفحتين A5') + opt('hwcols','📝 ورقة الواجب بعمودين وخط فاصل')
     + `</select></label>`;
 }
 function applyPrintLayoutToArea(){
@@ -3683,6 +3685,56 @@ function buildPrintSheet(ex){
     }
     bodyHtml += _htmls[i];
   }
+  // ورقة الواجب بعمودين: نقيس ارتفاع كل سؤال بعرض عمود واحد، ثم نوزّع الأسئلة المتتالية (بين عناوين التمارين)
+  // على عمودين متوازنين بخط فاصل (الأول يمين) — مثل الورقة الورقية الحقيقية.
+  if(HW && getPrintLayout()==='hwcols'){
+    const MAXH = 900; // أقصى ارتفاع لعمود واحد (بكسل) حتى تدخل الكتلة في صفحة A4
+    const _hwH = (idxs)=>{
+      const probe = document.createElement('div');
+      probe.className = 'sheet hw';
+      probe.style.cssText = 'visibility:hidden;';
+      probe.innerHTML = '<div class="sheet-cols"><div class="sheet-col"></div><div class="sheet-col"></div></div>';
+      area.appendChild(probe);
+      const col = probe.querySelector('.sheet-col');
+      col.innerHTML = idxs.map(k=>_htmls[k]).join('');
+      try{ renderMathIn(probe); }catch(e){}
+      const hs = Array.from(col.children).map(el=> el.getBoundingClientRect().height + 9);
+      probe.remove();
+      return hs.length===idxs.length ? hs : idxs.map(()=>200);
+    };
+    const _emit = (idxs)=>{
+      if(!idxs.length) return '';
+      const hs = _hwH(idxs);
+      const chunks = []; let cur = [], sum = 0;
+      idxs.forEach((k,n)=>{
+        if(cur.length && sum+hs[n] > 2*MAXH*0.92){ chunks.push(cur); cur=[]; sum=0; }
+        cur.push(n); sum += hs[n];
+      });
+      if(cur.length) chunks.push(cur);
+      let out = '';
+      chunks.forEach(ch=>{
+        if(ch.length===1){ out += _htmls[idxs[ch[0]]]; return; }
+        const total = ch.reduce((a,n)=>a+hs[n],0);
+        let acc = 0, split = 1, best = Infinity;
+        for(let t=1;t<ch.length;t++){
+          acc += hs[ch[t-1]];
+          const d = Math.abs(acc - total/2);
+          if(d<best){ best=d; split=t; }
+        }
+        const c1 = ch.slice(0,split).map(n=>_htmls[idxs[n]]).join('');
+        const c2 = ch.slice(split).map(n=>_htmls[idxs[n]]).join('');
+        out += `<div class="sheet-cols"><div class="sheet-col">${c1}</div><div class="sheet-col">${c2}</div></div>`;
+      });
+      return out;
+    };
+    let hb = '', run = [];
+    for(let i=0;i<_items.length;i++){
+      if(_items[i].type==='passage'){ hb += _emit(run); run = []; hb += _htmls[i]; }
+      else run.push(i);
+    }
+    hb += _emit(run);
+    bodyHtml = hb;
+  }
   if(HW){
     const _tt = String(ex.title||'');
     const _blank = (w)=>`<i class="hw-fill" style="min-width:${w}px;">&nbsp;</i>`;
@@ -3690,7 +3742,7 @@ function buildPrintSheet(ex){
     <div class="sheet hw">
       <div class="sheet-head">
         <div class="hw-row"><span>متوسطة: ${_blank(170)}</span><span>المستوى: ${_blank(80)}</span><span>السنة الدراسية: ${_blank(90)}</span></div>
-        <div class="hw-title">${esc(_tt)}${/رياضيات|math/i.test(_tt)?'':' في مادة الرياضيات'}</div>
+        <div class="hw-title">${esc(_tt)}${(ex.subject && !_tt.includes(ex.subject))?' في مادة '+esc(ex.subject):''}</div>
         <div class="hw-row"><span>اللقب: ${_blank(110)}</span><span>الاسم: ${_blank(110)}</span><span>القسم: ${_blank(40)}</span><span>العلامة: ${_blank(40)} / ${ex.totalPoints}</span></div>
       </div>
       ${bodyHtml}
