@@ -560,7 +560,23 @@ function tryImportCfgFromUrl(){
 
 /* ============================= HELPERS ============================= */
 function el(html){ const d=document.createElement('div'); d.innerHTML=html.trim(); return d.firstChild; }
-function esc(s){ return (s??'').toString().replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+/* يحوّل كيانات HTML الرقمية والمسماة (&#39; &#039; &#x27; &#8217; &rsquo; &amp;#39; ...) لحروفها الأصلية.
+   الذكاء الاصطناعي يُخرج أحيانًا l&#39;ami بدل l'ami، فتظهر الأرقام (&#39;) بدل الأبوستروف. */
+function decodeHtmlEntities(str){
+  if(typeof str !== 'string' || str.indexOf('&') === -1) return str;
+  const named = { amp:'&', lt:'<', gt:'>', quot:'"', apos:"'", nbsp:'\u00A0', rsquo:'\u2019', lsquo:'\u2018', rdquo:'\u201D', ldquo:'\u201C', laquo:'\u00AB', raquo:'\u00BB', hellip:'\u2026', ndash:'\u2013', mdash:'\u2014' };
+  let out = str;
+  for(let k=0;k<4;k++){
+    const prev = out;
+    out = out
+      .replace(/&#x([0-9a-f]{1,6});?/gi, (m,h)=>{ try{ return String.fromCodePoint(parseInt(h,16)); }catch(e){ return m; } })
+      .replace(/&#(\d{2,7});?/g, (m,d)=>{ try{ return String.fromCodePoint(parseInt(d,10)); }catch(e){ return m; } })
+      .replace(/&(amp|lt|gt|quot|apos|nbsp|rsquo|lsquo|rdquo|ldquo|laquo|raquo|hellip|ndash|mdash);/gi, (m,n)=> named[n.toLowerCase()]);
+    if(out === prev) break;
+  }
+  return out;
+}
+function esc(s){ return decodeHtmlEntities((s??'').toString()).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 /* يحوّل رموز LaTeX ($...$ أو $$...$$) الموجودة داخل نص إلى صيغ رياضية منسّقة (KaTeX). */
 function renderMathIn(container){
@@ -754,10 +770,7 @@ function fixLiteralNewlines(text){
   if(!text) return text;
   // الرموز HTML التي يخرجها الذكاء الاصطناعي أحيانًا (M&#39;hamed) تُحوَّل لحروفها قبل أي معالجة
   // حلقة لأن الترميز قد يكون مزدوجًا (&amp;#39; ← &#39; ← ')
-  let s = String(text);
-  for(let k=0;k<4 && /&(#39|#x27|apos|quot|amp);/i.test(s);k++){
-    s = s.replace(/&#39;|&#x27;|&apos;/gi,"'").replace(/&quot;/gi,'"').replace(/&amp;/gi,'&');
-  }
+  let s = decodeHtmlEntities(String(text));
   // خارج علامات $ : كل \n حرفية = سطر جديد (حتى قبل حرف مثل \nB-)؛ داخل المعادلات نحمي أوامر LaTeX مثل \neq و\nu
   return s.split(/(\$\$[\s\S]*?\$\$|\$[^$\n]*?\$)/g).map((part,i)=> i%2===1
     ? part.replace(/\\n(?![A-Za-z])/g,'\n')
@@ -1238,7 +1251,14 @@ function extractJSON(text){
   const start = t.indexOf('{'); const end = t.lastIndexOf('}');
   if(start>=0 && end>start) t = t.slice(start, end+1);
   t = sanitizeJsonEscapes(t);
-  return JSON.parse(t);
+  const parsed = JSON.parse(t);
+  const deepDecode = (v)=>{
+    if(typeof v === 'string') return decodeHtmlEntities(v);
+    if(Array.isArray(v)) return v.map(deepDecode);
+    if(v && typeof v === 'object'){ const o = {}; for(const k in v) o[k] = deepDecode(v[k]); return o; }
+    return v;
+  };
+  return deepDecode(parsed);
 }
 
 /* Calls Claude, auto-continuing if truncated by max_tokens.
