@@ -3685,66 +3685,84 @@ function buildPrintSheet(ex){
     }
     bodyHtml += _htmls[i];
   }
-  // ورقة الواجب بعمودين: نقيس ارتفاع كل سؤال بعرض عمود واحد، ثم نوزّع الأسئلة المتتالية (بين عناوين التمارين)
-  // على عمودين متوازنين بخط فاصل (الأول يمين) — مثل الورقة الورقية الحقيقية.
-  if(HW && getPrintLayout()==='hwcols'){
-    const MAXH = 900; // أقصى ارتفاع لعمود واحد (بكسل) حتى تدخل الكتلة في صفحة A4
-    const _hwH = (idxs)=>{
-      const probe = document.createElement('div');
-      probe.className = 'sheet hw';
-      probe.style.cssText = 'visibility:hidden;';
-      probe.innerHTML = '<div class="sheet-cols"><div class="sheet-col"></div><div class="sheet-col"></div></div>';
-      area.appendChild(probe);
-      const col = probe.querySelector('.sheet-col');
-      col.innerHTML = idxs.map(k=>_htmls[k]).join('');
-      try{ renderMathIn(probe); }catch(e){}
-      const hs = Array.from(col.children).map(el=> el.getBoundingClientRect().height + 9);
-      probe.remove();
-      return hs.length===idxs.length ? hs : idxs.map(()=>200);
-    };
-    const _emit = (idxs)=>{
-      if(!idxs.length) return '';
-      const hs = _hwH(idxs);
-      const chunks = []; let cur = [], sum = 0;
-      idxs.forEach((k,n)=>{
-        if(cur.length && sum+hs[n] > 2*MAXH*0.92){ chunks.push(cur); cur=[]; sum=0; }
-        cur.push(n); sum += hs[n];
-      });
-      if(cur.length) chunks.push(cur);
-      let out = '';
-      chunks.forEach(ch=>{
-        if(ch.length===1){ out += _htmls[idxs[ch[0]]]; return; }
-        const total = ch.reduce((a,n)=>a+hs[n],0);
-        let acc = 0, split = 1, best = Infinity;
-        for(let t=1;t<ch.length;t++){
-          acc += hs[ch[t-1]];
-          const d = Math.abs(acc - total/2);
-          if(d<best){ best=d; split=t; }
-        }
-        const c1 = ch.slice(0,split).map(n=>_htmls[idxs[n]]).join('');
-        const c2 = ch.slice(split).map(n=>_htmls[idxs[n]]).join('');
-        out += `<div class="sheet-cols"><div class="sheet-col">${c1}</div><div class="sheet-col">${c2}</div></div>`;
-      });
-      return out;
-    };
-    let hb = '', run = [];
-    for(let i=0;i<_items.length;i++){
-      if(_items[i].type==='passage'){ hb += _emit(run); run = []; hb += _htmls[i]; }
-      else run.push(i);
-    }
-    hb += _emit(run);
-    bodyHtml = hb;
-  }
-  if(HW){
+  // رأس ورقة الواجب (مشترك بين الطباعة العادية وقياس الارتفاع)
+  const _hwHeadHTML = ()=>{
     const _tt = String(ex.title||'');
     const _blank = (w)=>`<i class="hw-fill" style="min-width:${w}px;">&nbsp;</i>`;
-    area.innerHTML = `
-    <div class="sheet hw">
-      <div class="sheet-head">
+    return `<div class="sheet-head">
         <div class="hw-row"><span>متوسطة: ${_blank(170)}</span><span>المستوى: ${_blank(80)}</span><span>السنة الدراسية: ${_blank(90)}</span></div>
         <div class="hw-title">${esc(_tt)}${(ex.subject && !_tt.includes(ex.subject))?' في مادة '+esc(ex.subject):''}</div>
         <div class="hw-row"><span>اللقب: ${_blank(110)}</span><span>الاسم: ${_blank(110)}</span><span>القسم: ${_blank(40)}</span><span>العلامة: ${_blank(40)} / ${ex.totalPoints}</span></div>
-      </div>
+      </div>`;
+  };
+  // ورقة الواجب بعمودين: الصفحة كاملة (عناوين التمارين + المعطيات + الأشكال + الأسئلة) تُقسَّم لعمودين بخط فاصل
+  // يمتد على كامل الصفحة. نقيس ارتفاع كل عنصر بعرض عمود واحد ثم نملأ العمود الأول (يمين) حتى آخر الصفحة،
+  // ثم الثاني، ثم ننتقل لصفحة جديدة. عنوان التمرين يبقى ملتصقًا بالعنصر الذي بعده.
+  if(HW && getPrintLayout()==='hwcols'){
+    const PAGE_H = 1000, SAFE = 0.96;
+    const _mk = ()=>{ const d = document.createElement('div'); d.className = 'sheet hw'; d.style.cssText = 'visibility:hidden;'; return d; };
+    let headH = 170;
+    try{
+      const hp = _mk(); hp.innerHTML = _hwHeadHTML(); area.appendChild(hp);
+      headH = hp.getBoundingClientRect().height + 8; hp.remove();
+    }catch(e){}
+    const cp = _mk();
+    cp.innerHTML = '<div class="sheet-cols"><div class="sheet-col"></div><div class="sheet-col"></div></div>';
+    area.appendChild(cp);
+    const probeCol = cp.querySelector('.sheet-col');
+    const measure = (html)=>{
+      probeCol.innerHTML = html;
+      try{ renderMathIn(probeCol); }catch(e){}
+      let h = probeCol.getBoundingClientRect().height;
+      // الصور التي لم تُفكّ بعد تُقاس بارتفاع صفر: نقدّر لها ارتفاعًا
+      probeCol.querySelectorAll('img').forEach(im=>{ if(!(im.complete && im.naturalHeight>0)) h += 260; });
+      return h;
+    };
+    const idxs = [];
+    for(let i=0;i<_items.length;i++){ if(_htmls[i]) idxs.push(i); }
+    const hs = {};
+    idxs.forEach(i=>{ hs[i] = measure(_htmls[i]); });
+    cp.remove();
+    const units = [];
+    for(let a=0;a<idxs.length;a++){
+      const i = idxs[a];
+      const isSec = _items[i].type==='passage' && _items[i].data.type==='section';
+      if(isSec && a+1<idxs.length){ const j = idxs[a+1]; units.push({html:_htmls[i]+_htmls[j], h:hs[i]+hs[j]}); a++; }
+      else units.push({html:_htmls[i], h:hs[i]});
+    }
+    const pages = [];
+    let pg = { items:[], split:null, hs:[0,0], cap:(PAGE_H - headH - 20)*SAFE }, c = 0;
+    units.forEach(u=>{
+      if(pg.hs[c]>0 && pg.hs[c]+u.h > pg.cap){
+        if(c===0){ c = 1; pg.split = pg.items.length; }
+        else { pages.push(pg); pg = { items:[], split:null, hs:[0,0], cap:PAGE_H*SAFE }; c = 0; }
+      }
+      pg.items.push(u); pg.hs[c] += u.h;
+    });
+    pages.push(pg);
+    // آخر صفحة: نوازن بين العمودين
+    const lp = pages[pages.length-1];
+    if(lp.items.length>1){
+      const total = lp.items.reduce((x,u)=>x+u.h,0);
+      let acc = 0, best = Infinity, sp = 1;
+      for(let t=1;t<lp.items.length;t++){
+        acc += lp.items[t-1].h;
+        const d = Math.abs(acc - total/2);
+        if(d<best){ best = d; sp = t; }
+      }
+      lp.split = sp;
+    }
+    const colHtml = (arr)=>arr.map(u=>u.html).join('');
+    bodyHtml = pages.map((p,ix)=>{
+      const sp = p.split===null ? p.items.length : p.split;
+      const last = ix===pages.length-1;
+      return `<div class="sheet-cols hw-page" style="${last?'':'min-height:'+Math.round(p.cap)+'px;'}"><div class="sheet-col">${colHtml(p.items.slice(0,sp))}</div><div class="sheet-col">${colHtml(p.items.slice(sp))}</div></div>`;
+    }).join('');
+  }
+  if(HW){
+    area.innerHTML = `
+    <div class="sheet hw">
+      ${_hwHeadHTML()}
       ${bodyHtml}
       ${sheetFooterBrandHTML()}
     </div>
