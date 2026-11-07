@@ -683,8 +683,11 @@ function isolateLatinMathRuns(text){
 // فكل مرة يُعرض أو يُطبع فيها، بلا الحاجة لإعادة استخراجه أو تعديله يدويًا. الدالة idempotent
 // (تطبيقها على نص مُصحَّح مسبقًا لا يغيّر فيه شيئًا)، فلا خطر من تكرار تطبيقها.
 function mathSafe(text, subject){
-  const out = isLtrSubject(subject) ? isolateLatinMathRuns(normalizeExtractedMath(text||'')) : esc(fixLiteralNewlines(text||''));
-  return out.replace(/\n/g, '<br>');
+  // [[كلمة]] = الكلمة المطلوب تحديدها (تُطبع مسطّرة). نستبدلها برمزين بديلين قبل المعالجة ثم نحوّلها لوسم <span> بعدها،
+  // حتى لا تبقى الأقواس المزدوجة ظاهرة حرفيًا في نص السؤال.
+  const src = String(text||'').replace(/\[\[(.+?)\]\]/g, '\uE000$1\uE001');
+  const out = isLtrSubject(subject) ? isolateLatinMathRuns(normalizeExtractedMath(src)) : esc(fixLiteralNewlines(src));
+  return out.replace(/\n/g, '<br>').replace(/\uE000/g,'<span class="u-target">').replace(/\uE001/g,'</span>');
 }
 
 /* ===================== تطبيع رموز يونيكود قبل أي فحص رياضي ===================== */
@@ -1506,6 +1509,7 @@ async function renderLanding(){
     <div class="center" style="margin-top:10px;">
       <a href="#" id="teacherLink" class="backlink">🔒 لوحة الأستاذ</a>
     </div>
+    <div class="center muted" style="margin-top:8px;font-size:11px;opacity:.6;">نسخة ${APP_VERSION}</div>
   `;
   document.getElementById('teacherLink').onclick = (e)=>{ e.preventDefault(); go(localStorage.getItem(TID_KEY) ? 'teacherGate' : 'teacherRegister'); };
   wireInstallButton('installAppBtn');
@@ -4172,7 +4176,28 @@ function render(){
   renderMathIn(app);
 }
 
-/* ============================= PWA / SERVICE WORKER (تحديث تلقائي) ============================= */
+/* ============================= رقم النسخة + فحص ذاتي ضد نسخة قديمة عالقة في الكاش ============================= */
+const APP_VERSION = '2026-11-07-c';
+(function(){
+  // نقارن النسخة العاملة بآخر نسخة على السيرفر؛ إن اختلفتا نمسح الكاش ونلغي الـService Worker القديم ونعيد التحميل مرة واحدة.
+  window.addEventListener('load', ()=>{
+    setTimeout(async ()=>{
+      try{
+        const r = await fetch(location.pathname + '?v=' + Date.now(), {cache:'no-store'});
+        const t = await r.text();
+        const m = t.match(/const APP_VERSION = '([^']+)'/);
+        if(m && m[1] !== APP_VERSION && !sessionStorage.getItem('upd_'+m[1])){
+          sessionStorage.setItem('upd_'+m[1], '1');
+          if(window.caches){ const ks = await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); }
+          if(navigator.serviceWorker){ const rg = await navigator.serviceWorker.getRegistrations(); await Promise.all(rg.map(x=>x.unregister())); }
+          location.reload();
+        }
+      }catch(e){}
+    }, 1500);
+  });
+})();
+
+/* ============================= PWA / SERVICE WORKER (تحديث تلقائي) =============================
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('service-worker.js').then(reg=>{
